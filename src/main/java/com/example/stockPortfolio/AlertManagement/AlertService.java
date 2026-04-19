@@ -1,88 +1,129 @@
 package com.example.stockPortfolio.AlertManagement;
 
+import com.example.stockPortfolio.HoldingsManagement.FmpStockPriceService;
+import com.example.stockPortfolio.HoldingsManagement.HoldingService;
+import com.fasterxml.jackson.databind.JsonNode;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class AlertService {
 
-    @Autowired
-    private AlertRepo alertRepo;
+    @Autowired private AlertRepo alertRepo;
+    @Autowired private AlertHistoryRepo historyRepo;
+    @Autowired private FmpStockPriceService fmpService;
+    @Autowired private HoldingService holdingService;
 
-    @Autowired
-    private StockService stockService;
+    private static final double RANGE_BUFFER = 0.01; // 1% buffer
+    private static final long COOLDOWN_MINUTES = 60; // Don't re-trigger same alert for 1 hour
 
-    @Scheduled(cron = "*/10 * * * * *")
-    public void checkAndTriggerAlerts() {
-        // Get all saved alerts
+    @Scheduled(fixedRate = 180000) // 3 mins
+    public void runSmartAlertEngine() {
         List<Alert> alerts = alertRepo.findAll();
-
-        // Get all current stock data
-        Map<String, StocksDTO> stocks = stockService.getAllStocks();
+        
+        Set<String> uniqueSymbols = alerts.stream().map(Alert::getSymbol).collect(Collectors.toSet());
+        Map<String, JsonNode> quoteMap = new HashMap<>();
+        for (String symbol : uniqueSymbols) {
+            quoteMap.put(symbol, fmpService.getFullQuote(symbol));
+        }
 
         for (Alert alert : alerts) {
-            if (stocks.containsKey(alert.getSymbol())) {
-                StocksDTO stock = stocks.get(alert.getSymbol());
+            try {
+                if (alert.getLastTriggeredAt() != null && 
+                    alert.getLastTriggeredAt().isAfter(LocalDateTime.now().minusMinutes(COOLDOWN_MINUTES))) {
+                    continue;
+                }
 
-                double currentPrice = stock.getCurrentPrice();
-                double targetPrice = Double.parseDouble(alert.getTargetPrice());
-                double changePercent = ((currentPrice - targetPrice) / targetPrice) * 100;
+                JsonNode quote = quoteMap.get(alert.getSymbol());
+                if (quote == null) continue;
 
-                String gainLossMessage = changePercent >= 0
-                        ? "Gain of " + String.format("%.2f", changePercent) + "%"
-                        : "Loss of " + String.format("%.2f", -changePercent) + "%";
-
-                alert.setGainOrLoss(gainLossMessage);
-                alertRepo.save(alert);
-
-                // Optional: log or perform further actions like notifications
-                System.out.println("Checked alert for " + alert.getSymbol() + ": " + gainLossMessage);
-            } else {
-                System.out.println("Symbol not found: " + alert.getSymbol());
+                double currentPrice = quote.get("price").asDouble();
+                
+                if (alert.getAlertType() == Alert.AlertType.USER) {
+                    processUserAlert(alert, currentPrice);
+                } else {
+                    processAutoAlerts(alert, quote, currentPrice);
+                }
+            } catch (Exception e) {
+                log.error("Error processing alert for {}: {}", alert.getSymbol(), e.getMessage());
             }
         }
     }
 
+    private void processUserAlert(Alert alert, double currentPrice) {
+        if (alert.getTargetPrice() == null) return;
+        
+        double target = alert.getTargetPrice();
+        double margin = target * RANGE_BUFFER;
+        
+        if (currentPrice >= (target - margin) && currentPrice <= (target + margin)) {
+            trigger(alert, "Target Range Reached", 
+                    String.format("🎯 Your target for %s is close! Current price: %.2f", alert.getSymbol(), currentPrice));
+        }
+    }
+
+    private void processAutoAlerts(Alert alert, JsonNode quote, double currentPrice) {
+        if (quote.has("yearHigh") && quote.has("yearLow")) {
+            double yearHigh = quote.get("yearHigh").asDouble();
+            double yearLow = quote.get("yearLow").asDouble();
+
+            if (currentPrice >= (yearHigh * 0.98)) {
+                trigger(alert, "Near 52W High", "🚀 " + alert.getSymbol() + " is soaring near its yearly high: " + yearHigh);
+                return;
+            } else if (currentPrice <= (yearLow * 1.02)) {
+                trigger(alert, "Near 52W Low", "📉 " + alert.getSymbol() + " is at a yearly low discount: " + yearLow);
+                return;
+            }
+        }
+
+        if (quote.has("changesPercentage")) {
+            double changePercent = quote.get("changesPercentage").asDouble();
+            if (changePercent >= 5.0) {
+                trigger(alert, "Major Price Swing", "🔥 " + alert.getSymbol() + " is rising fast! (+" + String.format("%.2f", changePercent) + "%)");
+            } else if (changePercent <= -5.0) {
+                trigger(alert, "Major Price Swing", "⚠️ Market dip detected for " + alert.getSymbol() + " (" + String.format("%.2f", changePercent) + "%)");
+            }
+        }
+    }
+
+    private void trigger(Alert alert, String reason, String message) {
+        alert.setTriggerReason(reason);
+        alert.setGainOrLoss(message);
+        alert.setLastTriggeredAt(LocalDateTime.now());
+        alertRepo.save(alert);
+
+        // SAVE TO HISTORY
+        AlertHistory history = new AlertHistory();
+        history.setUserId(alert.getUserId());
+        history.setSymbol(alert.getSymbol());
+        history.setMessage(message);
+        history.setAlertType(alert.getAlertType().name());
+        history.setTriggeredAt(LocalDateTime.now());
+        historyRepo.save(history);
+
+        log.info("ALERT TRIGGERED [{}]: {} for User {}", alert.getSymbol(), reason, alert.getUserId());
+    }
+
     public AlertDTO addAlert(Alert alert) {
-        // Convert target price string to double
-        double targetPrice = Double.parseDouble(alert.getTargetPrice());
+        double currentPrice = fmpService.getLatestPrice(alert.getSymbol());
 
-        // Get map of all stocks: symbol -> StocksDTO
-        Map<String, StocksDTO> stocks = stockService.getAllStocks();
-
-        // Check if symbol exists
-        if (stocks.containsKey(alert.getSymbol())) {
-            StocksDTO stock = stocks.get(alert.getSymbol());
-
-            double currentPrice = stock.getCurrentPrice();
-            double changePercent = ((currentPrice - targetPrice) / targetPrice) * 100;
-            String gainLossMessage = changePercent >= 0
-                    ? "Gain of " + String.format("%.2f", changePercent) + "%"
-                    : "Loss of " + String.format("%.2f", -changePercent) + "%";
-
-            alert.setGainOrLoss(gainLossMessage);
+        if (currentPrice > 0) {
+            alert.setLastTriggeredAt(null);
             alertRepo.save(alert);
 
-            // Prepare DTO
             AlertDTO dto = new AlertDTO();
-            if (currentPrice > targetPrice) {
-                dto.setMessage("Alert Triggered -> " + gainLossMessage);
-            } else {
-                dto.setMessage("Alert Saved (Condition Not Met) -> " + gainLossMessage);
-            }
-            dto.setMessage("Alert Triggered -> " + gainLossMessage);
+            dto.setMessage("Alert Set for " + alert.getSymbol() + " 🔔");
             dto.setLocalDateTime(LocalDateTime.now());
-            dto.setHttpStatus(HttpStatus.OK);
-            dto.setStatus(HttpStatus.OK.value());
+            dto.setStatus(200);
             return dto;
         } else {
-            throw new RuntimeException("Stock symbol not found in the available stock data.");
+            throw new RuntimeException("Stock symbol not found or FMP API error.");
         }
     }
 }

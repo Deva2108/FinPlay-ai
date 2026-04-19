@@ -1,9 +1,13 @@
 package com.example.stockPortfolio.HoldingsManagement;
 
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.util.List;
 
 @Data
+@NoArgsConstructor
 public class HoldingResponseDTO {
     private List<HoldingStatusDTO> holdings;
     private double totalValue;

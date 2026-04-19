@@ -2,6 +2,7 @@ package com.example.stockPortfolio.UserManagement;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 //this class is for seperate usage while login for the user
@@ -15,7 +16,6 @@ public class LoginRequestDTO {
     )
     private String email;
     @NotBlank(message = "Password required!")
-    @Pattern(regexp = "(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,}",
-            message = "at least one letter, at least one digit, 6 or more characters")
+    @Size(min = 6, message = "Password must be at least 6 characters")
     private String password;
 }

@@ -15,8 +15,10 @@ public class Portfolio {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long portfolioId;
-    @NotNull(message = "userID is Required!")
+    
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
     private Long userId;
+    
     @NotBlank(message = "PortfolioName is Required!")
     @Size(max = 60, message = "Maximum 60 letters!")
     private String portfolioName;

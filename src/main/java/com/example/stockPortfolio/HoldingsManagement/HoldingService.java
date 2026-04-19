@@ -2,6 +2,7 @@ package com.example.stockPortfolio.HoldingsManagement;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -11,7 +12,9 @@ public class HoldingService {
 
     private final HoldingRepo holdingRepo;
     private final TransactionRepo transactionRepo;
+    private final FmpStockPriceService fmpService;
 
+    @Transactional
     public void processTransaction(Transaction txn) {
         Optional<Holding> optionalHolding = holdingRepo
                 .findByUserIdAndPortfolioId(txn.getUserId(), txn.getPortfolioId())
@@ -54,40 +57,38 @@ public class HoldingService {
 
     public HoldingResponseDTO getHoldingsWithDetails(Long userId, Long portfolioId) {
         List<Holding> holdings = holdingRepo.findByUserIdAndPortfolioId(userId, portfolioId);
-        Map<String, StockDTO> stockMap = StockPriceService.getStockDetailsMap();
-
         List<HoldingStatusDTO> statusList = new ArrayList<>();
         double totalValue = 0.0;
 
         for (Holding h : holdings) {
-            StockDTO stock = stockMap.get(h.getSymbol());
+            com.fasterxml.jackson.databind.JsonNode quote = fmpService.getFullQuote(h.getSymbol());
 
-            if (stock != null) {
+            if (quote != null && quote.has("price")) {
+                double currentPrice = quote.get("price").asDouble();
                 HoldingStatusDTO dto = new HoldingStatusDTO();
                 dto.setSymbol(h.getSymbol());
-                dto.setCompanyName(stock.getCompanyName());
-                dto.setSector(stock.getSector());
+                dto.setCompanyName(quote.has("name") ? quote.get("name").asText() : "N/A");
+                dto.setSector("N/A");
                 dto.setQuantity(h.getQuantity());
                 dto.setBuyPrice(h.getBuyPrice());
-                dto.setCurrentPrice(stock.getCurrentPrice());
+                dto.setCurrentPrice(currentPrice);
 
-                double gain = (stock.getCurrentPrice() - h.getBuyPrice()) * h.getQuantity();
+                double gain = (currentPrice - h.getBuyPrice()) * h.getQuantity();
                 dto.setGain(gain);
                 dto.setGainPercentage((gain / (h.getBuyPrice() * h.getQuantity())) * 100);
 
-                totalValue += stock.getCurrentPrice() * h.getQuantity();
+                totalValue += currentPrice * h.getQuantity();
                 statusList.add(dto);
             }
         }
 
-        return new HoldingResponseDTO(statusList, totalValue, 200, "Holdings fetched successfully.");
+        return new HoldingResponseDTO(statusList, totalValue, 200, "Live FMP holdings fetched.");
     }
 
-
     public List<TransactionDTO> getAllTransactions(Long userId, Long portfolioId) {
-        List<Transaction> transactions = transactionRepo.findByUserIdAndPortfolioIdOrderByTransactionDateDesc(userId, portfolioId);
+        List<Transaction> allTransactions = transactionRepo.findByUserIdAndPortfolioIdOrderByTransactionDateDesc(userId, portfolioId);
 
-        return transactions.stream().map(txn -> {
+        return allTransactions.stream().map(txn -> {
             TransactionDTO dto = new TransactionDTO();
             dto.setTransactionId(txn.getTransactionId());
             dto.setUserId(txn.getUserId());
@@ -102,7 +103,7 @@ public class HoldingService {
                 double totalBuyQty = 0;
                 double totalBuyCost = 0;
 
-                for (Transaction t : transactionRepo.findByUserIdAndPortfolioIdOrderByTransactionDateDesc(userId, portfolioId)) {
+                for (Transaction t : allTransactions) {
                     if (t.getSymbol().equalsIgnoreCase(txn.getSymbol())
                             && t.getType() == Transaction.TransactionType.BUY
                             && t.getTransactionDate().isBefore(txn.getTransactionDate())) {
@@ -132,35 +133,10 @@ public class HoldingService {
         }).collect(Collectors.toList());
     }
 
-    public void updateHolding(Long id, HoldingUpdateDTO dto) {
-        Holding holding = holdingRepo.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("Holding not found with id: " + id));
-
-        if (dto.getQuantity() != null) {
-            if (dto.getQuantity() < 0) {
-                throw new IllegalArgumentException("Quantity cannot be negative");
-            }
-            holding.setQuantity(dto.getQuantity());
-        }
-
-        if (dto.getBuyPrice() != null) {
-            if (dto.getBuyPrice() < 0) {
-                throw new IllegalArgumentException("Buy price cannot be negative");
-            }
-            holding.setBuyPrice(dto.getBuyPrice());
-        }
-
-        if (holding.getQuantity() == 0) {
-            holdingRepo.delete(holding);
-        } else {
-            holdingRepo.save(holding);
-        }
-    }
-
+    @Transactional
     public void deleteHolding(Long id) {
         Holding holding = holdingRepo.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Holding not found with id: " + id));
         holdingRepo.delete(holding);
     }
-
 }

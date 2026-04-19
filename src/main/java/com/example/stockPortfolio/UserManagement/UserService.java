@@ -1,45 +1,81 @@
 package com.example.stockPortfolio.UserManagement;
 
 import com.example.stockPortfolio.ExceptionManagement.UserNotFoundException;
+import com.example.stockPortfolio.PortfolioManagement.Portfolio;
+import com.example.stockPortfolio.PortfolioManagement.PortfolioService;
+import com.example.stockPortfolio.Security.JwtUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-//contains all the main logic
 @Service
 public class UserService {
 
-    //it's like injecting the userRepo methods inside this class
-    //behind the scenes, this is automatically creating an object
     @Autowired
-    UserRepo userRepo;
+    private UserRepo userRepo;
 
-    //registration of the user
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private AuthenticationManager authenticationManager;
+
+    @Autowired
+    private JwtUtils jwtUtils;
+
+    @Autowired
+    private UserDetailsService userDetailsService;
+
+    @Autowired
+    private PortfolioService portfolioService;
+
+    @Transactional
     public UserModel register(UserModel userModel){
         if(userRepo.existsByEmail(userModel.getEmail())){
             throw new UserNotFoundException("User already exists in our database");
         }else{
-            return userRepo.save(userModel);
+            userModel.setPassword(passwordEncoder.encode(userModel.getPassword()));
+            UserModel savedUser = userRepo.save(userModel);
+            
+            // Auto-create initial portfolio for UX
+            Portfolio defaultPortfolio = new Portfolio();
+            defaultPortfolio.setUserId(savedUser.getUserId());
+            defaultPortfolio.setPortfolioName("My Learning Portfolio 🎒");
+            portfolioService.addPortfolio(defaultPortfolio);
+            
+            return savedUser;
         }
     }
 
-    //login for the user
     public String login(String email, String password){
-        UserModel user = userRepo.findByEmail(email)
-                .orElseThrow(()->new UserNotFoundException("Email not present in our database. Please register"));
-
-        if(!user.getPassword().equals(password)){
-            throw new UserNotFoundException("Incorrect password!");
+        try {
+            authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, password));
+        } catch (Exception e) {
+            throw new UserNotFoundException("Incorrect email or password!");
         }
-        return "Login Successful!";
+
+        final UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+        return jwtUtils.generateToken(userDetails);
     }
 
-    //user can edit the profile, if he wants
+    public UserModel getUserByEmail(String email) {
+        return userRepo.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("User not found: " + email));
+    }
+
     public UserModel editProfile(String email, UserModel userModel){
         return userRepo.findByEmail(email)
                 .map(existed->{
                     existed.setName(userModel.getName());
                     existed.setEmail(userModel.getEmail());
-                    existed.setPassword(userModel.getPassword());
+                    if (userModel.getPassword() != null && !userModel.getPassword().isEmpty()) {
+                        existed.setPassword(passwordEncoder.encode(userModel.getPassword()));
+                    }
                     return userRepo.save(existed);
                 }).orElseThrow(()->new UserNotFoundException("Email not found: "+email));
     }

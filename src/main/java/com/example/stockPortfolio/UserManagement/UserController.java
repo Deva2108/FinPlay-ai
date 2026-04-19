@@ -23,8 +23,9 @@ public class UserController {
 
     //api for login
     @PostMapping("/login")
-    public String login(@Valid @RequestBody LoginRequestDTO loginRequest){
-        return userService.login(loginRequest.getEmail(), loginRequest.getPassword());
+    public java.util.Map<String, String> login(@Valid @RequestBody LoginRequestDTO loginRequest){
+        String token = userService.login(loginRequest.getEmail(), loginRequest.getPassword());
+        return java.util.Collections.singletonMap("token", token);
     }
 
     //api for updating the profile

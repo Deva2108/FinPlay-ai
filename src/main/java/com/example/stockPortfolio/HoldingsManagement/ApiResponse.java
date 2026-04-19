@@ -1,8 +1,11 @@
 package com.example.stockPortfolio.HoldingsManagement;
 
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
+
 public class ApiResponse<T> {
     private T result;
     private int status;
