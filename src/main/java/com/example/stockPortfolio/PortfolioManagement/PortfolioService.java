@@ -11,6 +11,19 @@ public class PortfolioService {
     private PortfolioRepo portfolioRepo;
 
     public Portfolio addPortfolio(Portfolio portfolio){
+        if (portfolio.getBalance() == null) {
+            portfolio.setBalance(100000.0);
+        }
+        if (portfolio.getInitialBalance() == null) {
+            portfolio.setInitialBalance(portfolio.getBalance());
+        }
+        return portfolioRepo.save(portfolio);
+    }
+
+    public Portfolio updateBalance(Long portfolioId, Double amount) {
+        Portfolio portfolio = portfolioRepo.findById(portfolioId)
+                .orElseThrow(() -> new ResourceNotFoundException("Portfolio not found with ID: " + portfolioId));
+        portfolio.setBalance(portfolio.getBalance() + amount);
         return portfolioRepo.save(portfolio);
     }
 

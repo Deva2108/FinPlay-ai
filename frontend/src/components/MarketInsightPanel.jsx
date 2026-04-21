@@ -23,7 +23,7 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
 
   if (!indexData) return null;
 
-  const isPositive = indexData.change && indexData.change.startsWith('+');
+  const isPositive = (indexData.change || "").startsWith('+');
   const accentColor = isPositive ? 'text-emerald-400' : 'text-rose-400';
 
   return (

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Zap, Target, Trophy, Activity, ChevronRight } from 'lucide-react';
+import { Zap, Target, Trophy, Activity, ChevronRight, BrainCircuit, Sparkles, Loader2 } from 'lucide-react';
 import GameStockCard from './GameMode/GameStockCard';
 import ActionPanel from './GameMode/ActionPanel';
 import OutcomeOverlay from './GameMode/OutcomeOverlay';
@@ -14,28 +14,29 @@ import { useTrading } from '../context/TradingContext';
 import { useBehavior } from '../context/BehaviorContext';
 
 const indiaArenaStocks = [
-  { symbol: 'RELIANCE', name: 'Reliance Industries', price: 2950.00, market: 'IN', change: '+1.2%', situation: 'Focusing on clean energy.', context: 'The company is building new factories for solar and wind power.', impact: '+2.3%', isPositive: true, explanation: 'Moving into green energy is seen as a smart long-term move by investors.' },
-  { symbol: 'ZOMATO', name: 'Zomato Limited', price: 185.00, market: 'IN', change: '+5.4%', situation: 'Orders are at a record high.', context: 'More people are ordering food during the festive season than ever before.', impact: '+6.5%', isPositive: true, explanation: 'Growing order numbers mean the company is earning more, which attracts buyers.' },
-  { symbol: 'HDFC BANK', name: 'HDFC Bank Ltd', price: 1450.00, market: 'IN', change: '-0.4%', situation: 'Combining two big companies.', context: 'Merging two large banks is taking more time and effort than expected.', impact: '-1.2%', isPositive: false, explanation: 'Investors are worried that the extra work might slow down profits for a few months.' },
-  { symbol: 'TCS', name: 'Tata Consultancy', price: 3840.00, market: 'IN', change: '-0.5%', situation: 'Global companies spending less.', context: 'Big clients in Europe are cutting their budgets for new software.', impact: '-2.1%', isPositive: false, explanation: 'Lower spending by clients means fewer contracts and lower earnings for TCS.' },
-  { symbol: 'INFY', name: 'Infosys Limited', price: 1520.00, market: 'IN', change: '+0.4%', situation: 'Winning big new deals.', context: 'The company just signed a ₹12,000 crore contract with a US retailer.', impact: '+4.2%', isPositive: true, explanation: 'New contracts guarantee future income, making the company more valuable today.' },
-  { symbol: 'TATA MOTORS', name: 'Tata Motors', price: 980.00, market: 'IN', change: '+2.1%', situation: 'EV Sales peaking.', context: 'The demand for electric cars in India is growing at 50% year-on-year.', impact: '+3.8%', isPositive: true, explanation: 'Dominance in the EV segment is positioning the company as a future leader.' },
-  { symbol: 'SBI', name: 'State Bank of India', price: 750.00, market: 'IN', change: '-1.5%', situation: 'Loan defaults rising.', context: 'Agricultural loan recoveries have slowed down this quarter.', impact: '-2.4%', isPositive: false, explanation: 'Risk of non-performing assets (NPAs) makes investors cautious about bank stocks.' },
-  { symbol: 'TITAN', name: 'Titan Company', price: 3600.00, market: 'IN', change: '+0.8%', situation: 'Wedding season demand.', context: 'Jewelry sales are expected to hit record highs this quarter.', impact: '+1.9%', isPositive: true, explanation: 'Strong consumption patterns in the luxury segment drive long-term value.' }
+  { symbol: 'RELIANCE', name: 'Reliance Industries', price: 2950.00, market: 'IN', change: '+1.2%', situation: 'Focusing on clean energy.', context: 'Building mega-factories for solar/wind.', impact: '+2.3%', isPositive: true, explanation: 'Green pivot is seen as a long-term growth driver.' },
+  { symbol: 'ZOMATO', name: 'Zomato Limited', price: 185.00, market: 'IN', change: '+5.4%', situation: 'Blinkit revenue growth soaring.', context: 'Quick commerce adoption hitting record highs.', impact: '+6.5%', isPositive: true, explanation: 'Rapid expansion in delivery markets drives valuation.' },
+  { symbol: 'HDFC BANK', name: 'HDFC Bank Ltd', price: 1450.00, market: 'IN', change: '-0.4%', situation: 'Post-merger integration delays.', context: 'Combining tech stacks is proving expensive.', impact: '-1.2%', isPositive: false, explanation: 'Operational friction is temporary but hurting sentiment.' },
+  { symbol: 'TCS', name: 'Tata Consultancy', price: 3840.00, market: 'IN', change: '-0.5%', situation: 'US Tech budgets tightening.', context: 'Major clients delaying big software overhauls.', impact: '-2.1%', isPositive: false, explanation: 'Macro slowdown reduces immediate contract pipeline.' },
+  { symbol: 'PAYTM', name: 'Paytm', price: 420.00, market: 'IN', change: '-10.0%', situation: 'Regulatory action on bank unit.', context: 'RBI imposes strict limits on new customers.', impact: '-15.4%', isPositive: false, explanation: 'Compliance hurdles create uncertainty for future growth.' },
+  { symbol: 'JIOFIN', name: 'Jio Financial', price: 350.00, market: 'IN', change: '+2.1%', situation: 'Entering Asset Management.', context: 'Partnership with global giant BlackRock confirmed.', impact: '+5.2%', isPositive: true, explanation: 'Massive scale potential in under-penetrated sectors.' },
+  { symbol: 'ADANI ENT', name: 'Adani Enterprises', price: 3100.00, market: 'IN', change: '+0.8%', situation: 'New airport expansion.', context: 'Successfully won bids for 3 more international terminals.', impact: '+3.1%', isPositive: true, explanation: 'Infrastructure dominance builds predictable long-term cashflows.' },
+  { symbol: 'TATA MOTORS', name: 'Tata Motors', price: 980.00, market: 'IN', change: '+2.1%', situation: 'EV Sales hitting peak capacity.', context: 'Demand for Nexon EV exceeds supply chain speed.', impact: '+3.8%', isPositive: true, explanation: 'Lead in the EV segment secures future market share.' }
 ];
 
 const usArenaStocks = [
-  { symbol: 'AAPL', name: 'Apple Inc.', price: 182.41, market: 'US', change: '-0.45%', situation: 'New AI features for iPhones.', context: 'Apple is adding powerful Artificial Intelligence to its next software update.', impact: '+3.5%', isPositive: true, explanation: 'Excitement about new technology usually makes people want to buy the stock.' },
-  { symbol: 'TSLA', name: 'Tesla, Inc.', price: 175.22, market: 'US', change: '+1.05%', situation: 'Selling fewer cars abroad.', context: 'Sales in some international markets have dropped due to more competition.', impact: '-4.2%', isPositive: false, explanation: 'If a company sells fewer products, its stock price often starts to fall.' },
-  { symbol: 'NVDA', name: 'NVIDIA Corporation', price: 894.52, market: 'US', change: '+2.45%', situation: 'High demand for AI chips.', context: 'Almost every tech company is buying NVIDIA chips to build AI tools.', impact: '+8.1%', isPositive: true, explanation: 'Huge demand for a product leads to record profits, which pushes the price up.' },
-  { symbol: 'MSFT', name: 'Microsoft Corp', price: 421.44, market: 'US', change: '+0.15%', situation: 'Cloud services growing fast.', context: 'More businesses are using Microsoft cloud tools to run their operations.', impact: '+4.8%', isPositive: true, explanation: 'Strong growth in a key part of the business makes the stock more attractive.' },
-  { symbol: 'GOOGL', name: 'Alphabet Inc.', price: 154.22, market: 'US', change: '-0.8%', situation: 'Facing new legal rules.', context: 'Government officials are checking if the company is following fair competition laws.', impact: '-3.1%', isPositive: false, explanation: 'Legal troubles can lead to big fines, which makes investors nervous.' }
+  { symbol: 'AAPL', name: 'Apple Inc.', price: 182.41, market: 'US', change: '-0.45%', situation: 'AI integrated into iOS.', context: 'Apple Intelligence expected to boost upgrade cycle.', impact: '+3.5%', isPositive: true, explanation: 'Software-driven cycles increase hardware demand.' },
+  { symbol: 'TSLA', name: 'Tesla, Inc.', price: 175.22, market: 'US', change: '+1.05%', situation: 'Global demand slowing.', context: 'Inventory build-up in China triggers price cuts.', impact: '-4.2%', isPositive: false, explanation: 'Margin compression is a major worry for investors.' },
+  { symbol: 'NVDA', name: 'NVIDIA Corporation', price: 894.52, market: 'US', change: '+2.45%', situation: 'Next-gen chips delayed.', context: 'Blackwell architecture facing minor design tweaks.', impact: '-3.1%', isPositive: false, explanation: 'Markets hate delays in the AI growth story.' },
+  { symbol: 'NFLX', name: 'Netflix', price: 620.00, market: 'US', change: '+1.8%', situation: 'Ad-tier revenue exceeds targets.', context: 'Lower-cost plan attracting millions of new users.', impact: '+7.4%', isPositive: true, explanation: 'New revenue streams reduce reliance on sub growth.' },
+  { symbol: 'META', name: 'Meta Platforms', price: 505.00, market: 'US', change: '+0.5%', situation: 'Llama 3 open-source release.', context: 'AI model becoming the industry standard for devs.', impact: '+4.2%', isPositive: true, explanation: 'Platform dominance through AI positioning.' }
 ];
 
-import { trackDecision, getDecisionStats } from '../services/api';
+import { trackDecision, getDecisionStats, api } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onShowInsight, context }) {
+  if (!marketMode) console.warn("FinPlayArena: marketMode is missing, defaulting to INDIA");
   const navigate = useNavigate();
   const stocks = marketMode === "INDIA" ? indiaArenaStocks : usArenaStocks;
   const { balance, executeBuy, recordGameResult } = useTrading();
@@ -61,6 +62,15 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
   const { openStockPanel, isOpen: isPanelOpen } = useStockPanel();
   const currentStock = stocks[currentIdx];
 
+  const confirmBuy = async (quantity) => {
+    const success = await executeBuy(currentStock, quantity);
+    if (success) {
+      setToast(`Bought ${quantity} shares of ${currentStock.symbol}`);
+      setIsBuyModalOpen(false);
+      handleNext();
+    }
+  };
+
   useEffect(() => {
     if (context) {
       console.log("Game loaded with context:", context);
@@ -69,163 +79,50 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
 
   useEffect(() => { restartGame(); }, [marketMode]);
 
+  const [roundDecisions, setRoundDecisions] = useState([]);
+  const ROUND_LIMIT = 5;
+
   const handleDecision = (choice) => {
-    if (gameStep !== 'DECISION' || isGameOver || isSubmitting) return;
-    if (choice === 'buy') { setIsBuyModalOpen(true); return; }
-    processDecision('skip');
-  };
-
-  const confirmBuy = (quantity) => {
-    const success = executeBuy(currentStock, quantity, currentStock.situation);
-    if (success) { setIsBuyModalOpen(false); processDecision('buy'); }
-  };
-
-  const processDecision = async (choice) => {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-
-    const isCorrect = (choice === 'buy' && currentStock.isPositive) || (choice === 'skip' && !currentStock.isPositive);
+    if (isGameOver || isSubmitting) return;
     
-    // Create Decision Object
-    const decisionObj = {
-      symbol: currentStock.symbol,
-      action: choice.toUpperCase(),
-      price: currentStock.price,
-      market: currentStock.market,
-      timestamp: new Date().toISOString()
+    const decision = {
+      symbol: currentStock?.symbol,
+      action: (choice || "").toUpperCase(),
+      price: currentStock?.price,
+      isPositive: currentStock?.isPositive,
+      impact: currentStock?.impact
     };
 
-    console.log("DEBUG: Decision Object Created:", decisionObj);
-
-    // Track Decision - Backend + LocalStorage Fallback
-    try {
-      setToast("Analyzing your decision...");
-      // 1. Backend
-      await trackDecision(decisionObj);
-      
-      // 2. Refresh Stats for personalized insight
-      const stats = await getDecisionStats();
-      setUserStats(stats);
-      refreshInsights();
-
-      // Evolving Narrative Logic
-      let narrativeText = "";
-      const isBuying = choice.toUpperCase() === 'BUY';
-      const actionVerb = isBuying ? 'acting with intent' : 'choosing comfort';
-      
-      if (stats.totalDecisions <= 2) {
-        narrativeText = `Small choice. No big deal. You're just getting started.`;
-      } else if (stats.totalDecisions <= 5) {
-        narrativeText = `This is becoming a habit. You're starting to ${actionVerb}.`;
-      } else {
-        narrativeText = `This is how your financial life shapes. You are ${actionVerb} repeatedly.`;
-      }
-      
-      setNarrative(narrativeText);
-      setTimeout(() => setNarrative(null), 6000);
-      setToast(null);
-    } catch (err) {
-      console.error("DEBUG: Backend tracking failed, falling back to localStorage", err);
-      // 2. LocalStorage Fallback
-      try {
-        const history = JSON.parse(localStorage.getItem('finplay_decision_history') || '[]');
-        history.push(decisionObj);
-        localStorage.setItem('finplay_decision_history', JSON.stringify(history.slice(-100)));
-      } catch (e) {
-        console.error("DEBUG: LocalStorage fallback also failed", e);
-      }
-    }
-
-    // Emotional Feedback Logic
-    let amount = 0;
-    let type = 'none';
-
-    if (currentStock.isPositive && choice === 'buy') {
-      amount = 120;
-      type = 'gain';
-    } else if (!currentStock.isPositive && choice === 'buy') {
-      amount = -80;
-      type = 'loss';
-    } else if (choice === 'skip' && currentStock.isPositive) {
-      amount = 150;
-      type = 'missed';
-    }
-
-    setLastResult({ amount, type });
-
-    // Fetch AI Evaluation
-    try {
-      const evaluationData = await evaluateDecision({
-        symbol: currentStock.symbol,
-        action: choice.toUpperCase(),
-        price: currentStock.price,
-        isPositive: currentStock.isPositive,
-        pattern: userInsights?.behaviorType || 'balanced'
-      });
-      setLastResult(prev => ({ ...prev, ...evaluationData }));
-    } catch (err) {
-      console.error("AI Evaluation failed", err);
-    }
-    if (amount !== 0) {
-      recordGameResult(amount, type);
-    }
-
-    // Record behavior
-    recordDecision(choice, currentStock, marketMode);
+    const newRound = [...(roundDecisions || []), decision];
+    setRoundDecisions(newRound);
     
-    // Logic for missed opportunities: if skipped but it was positive
-    if (choice === 'skip' && currentStock.isPositive) {
-      addMissedOpportunity(currentStock, currentStock.impact);
-    }
-
-    if (choice === 'buy') {
-      setToast(`DECISION LOGGED: ${currentStock.symbol} added to analysis.`);
-      setTimeout(() => setToast(null), 3000);
-    } else {
-      setToast(`DECISION LOGGED: Skipped ${currentStock.symbol}.`);
-      setTimeout(() => setToast(null), 3000);
-    }
-
-    setUserChoice(choice);
-    setQuickFlash(isCorrect ? 'correct' : 'wrong');
-    setDecisionCount(prev => prev + 1);
-
-    // Floating Feedback Logic
-    let feedback = "";
-    if (choice === 'buy') {
-      feedback = isCorrect ? "Momentum Master" : "Late Entry";
-    } else {
-      feedback = isCorrect ? "Clean Avoid" : "Missed Rally";
-    }
-    setFloatingFeedback(feedback);
-
-    if (isCorrect) {
-      setScore(prev => prev + 1);
-      setStreak(prev => prev + 1);
-    } else {
-      setStreak(0);
-    }
-
-    if (decisionCount + 1 === 3) {
-      setNarrative("Your decisions are shaping your portfolio");
-      setTimeout(() => setNarrative(null), 3000);
-    }
-
-    if (onDecisionMade) {
-      onDecisionMade({
-        stock: currentStock,
-        choice,
-        isCorrect
-      });
-    }
-
+    // Visual feedback (Brief Flash)
+    setQuickFlash((choice === 'buy' && currentStock?.isPositive) || (choice === 'skip' && !currentStock?.isPositive) ? 'correct' : 'wrong');
+    
     setTimeout(() => {
       setQuickFlash(null);
-      setFloatingFeedback(null);
-      setGameStep('FLASH');
-      setIsSubmitting(false); // Enable for next stock after animation
-      setTimeout(() => setGameStep('OBJECTIVE'), 600);
-    }, 1000);
+      if (newRound.length >= ROUND_LIMIT) {
+        setGameStep('SUMMARY');
+        generateDiagnosis(newRound);
+      } else {
+        setCurrentIdx(prev => (prev + 1) % (stocks?.length || 1));
+      }
+    }, 400);
+  };
+
+  const [diagnosis, setDiagnosis] = useState(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+
+  const generateDiagnosis = async (history) => {
+    setIsDiagnosing(true);
+    try {
+      const res = await api.post('/api/ai/arena/summary', { decisions: history });
+      setDiagnosis(res.data.diagnosis);
+    } catch (err) {
+      setDiagnosis("Your patterns show a mix of caution and momentum. You're building a balanced eye for market entries.");
+    } finally {
+      setIsDiagnosing(false);
+    }
   };
 
   const handleNext = () => {
@@ -246,16 +143,18 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
     setStreak(0);
     setIsGameOver(false);
     setDecisionCount(0);
+    setRoundDecisions([]);
+    setDiagnosis(null);
   };
 
   const gameResultInsight = useMemo(() => {
     if (!isGameOver) return null;
     return getLearningInsight({
-      decisions: decisions.slice(0, stocks.length), 
-      missedOpportunities: behaviorMissed.slice(0, 3),
+      decisions: (decisions || []).slice(0, stocks?.length || 0), 
+      missedOpportunities: (behaviorMissed || []).slice(0, 3),
       holdings: [], 
     });
-  }, [isGameOver, decisions, behaviorMissed, stocks.length]);
+  }, [isGameOver, decisions, behaviorMissed, stocks?.length]);
 
   if (isGameOver) {
     return (
@@ -263,7 +162,7 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center p-12 bg-slate-900/60 rounded-3xl border border-blue-500/20 shadow-2xl backdrop-blur-md">
           <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-blue-500/20"><Trophy size={40} className="text-blue-500" /></div>
           <h2 className="text-3xl font-black text-white mb-2 uppercase tracking-tighter">Arena Cleared</h2>
-          <p className="text-slate-400 font-bold mb-8 uppercase tracking-widest text-sm">Accuracy: {((score / stocks.length) * 100).toFixed(0)}% • Total: {score}/{stocks.length}</p>
+          <p className="text-slate-400 font-bold mb-8 uppercase tracking-widest text-sm">Accuracy: {((score / (stocks?.length || 1)) * 100).toFixed(0)}% • Total: {score}/{stocks?.length || 0}</p>
           
           <div className="mb-8 text-left">
             <MicroLearningCard insight={gameResultInsight} />
@@ -277,7 +176,7 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
 
   return (
     <div className="space-y-6">
-      <BuyModal stock={currentStock} balance={balance} isOpen={isBuyModalOpen} onClose={() => setIsBuyModalOpen(false)} onConfirm={confirmBuy} />
+      <BuyModal stock={currentStock} balance={balance} isOpen={isBuyModalOpen} onClose={() => setIsBuyModalOpen(false)} onConfirm={(qty) => confirmBuy?.(qty)} />
 
       <div className="flex items-center justify-between px-4">
         <div className="flex items-center gap-3">
@@ -299,7 +198,7 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
           <div className="h-8 w-[1px] bg-white/10" />
           <div className="flex flex-col items-end">
              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1.5">Progress</span>
-             <span className="text-sm font-black text-white leading-none">{currentIdx + 1} / {stocks.length}</span>
+             <span className="text-sm font-black text-white leading-none">{currentIdx + 1} / {(stocks || []).length}</span>
           </div>
         </div>
       </div>
@@ -378,21 +277,43 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
                   
                   {/* Continuation Flow Strip */}
                   <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-center gap-8">
-                     <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Next Steps:</span>
-                     <div className="flex gap-4">
-                        <button onClick={() => navigate('/insights')} className="flex items-center gap-2 text-[10px] font-black text-slate-500 hover:text-blue-400 transition-colors uppercase tracking-widest">
-                          <Activity size={12}/>
-                          View Signals
-                        </button>
-                        <button onClick={() => navigate('/portfolio')} className="flex items-center gap-2 text-[10px] font-black text-slate-500 hover:text-blue-400 transition-colors uppercase tracking-widest">
-                          <Trophy size={12}/>
-                          Check Portfolio
-                        </button>
-                        <button onClick={handleNext} className="flex items-center gap-2 text-[10px] font-black text-slate-500 hover:text-blue-400 transition-colors uppercase tracking-widest">
-                          <ChevronRight size={12}/>
-                          Continue Game
-                        </button>
-                     </div>
+                     <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Round {roundDecisions.length + 1} of {ROUND_LIMIT}</span>
+                  </div>
+                </div>
+              </motion.div>
+            ) : gameStep === 'SUMMARY' ? (
+              <motion.div key="summary" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="max-w-2xl mx-auto py-10">
+                <div className="bg-slate-900 border border-blue-500/20 rounded-[3rem] p-10 text-center space-y-8 shadow-2xl relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-6 opacity-5"><BrainCircuit size={120} className="text-blue-400" /></div>
+                  
+                  <div className="space-y-2 relative z-10">
+                    <div className="flex items-center justify-center gap-2 text-blue-400 mb-2">
+                      <Sparkles size={16} />
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em]">Diagnosis Complete</span>
+                    </div>
+                    <h2 className="text-4xl font-black text-white tracking-tighter">Your Trading <br/> <span className="text-blue-500">Personality</span></h2>
+                  </div>
+
+                  <div className="bg-white/5 border border-white/10 p-8 rounded-[2rem] text-left">
+                    {isDiagnosing ? (
+                      <div className="flex flex-col items-center gap-4 py-4">
+                        <Loader2 size={24} className="animate-spin text-blue-500" />
+                        <p className="text-[10px] font-black text-blue-400 uppercase animate-pulse">Analyzing Psychology...</p>
+                      </div>
+                    ) : (
+                      <p className="text-lg font-bold leading-relaxed text-blue-100 italic">"{diagnosis}"</p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-5 gap-2">
+                    {(roundDecisions || []).map((d, i) => (
+                      <div key={i} className={`h-1.5 rounded-full ${d?.action === 'BUY' ? (d?.isPositive ? 'bg-emerald-500' : 'bg-rose-500') : 'bg-slate-700'}`} />
+                    ))}
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <button onClick={restartGame} className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl uppercase tracking-widest text-xs hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/20">Enter Next Round</button>
+                    <button onClick={() => navigate('/portfolio')} className="w-full py-5 bg-white/5 text-slate-400 border border-white/10 rounded-2xl uppercase tracking-widest text-xs font-black hover:text-white transition-all">Go to Portfolio</button>
                   </div>
                 </div>
               </motion.div>

@@ -33,7 +33,7 @@ export default function LastMoveCard({ decision, onNext }) {
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-8">
             <div className="flex items-center gap-6">
               <div className="w-16 h-16 rounded-[1.5rem] bg-slate-800 flex items-center justify-center font-black text-white text-xl shadow-inner border border-white/5">
-                {stock.symbol[0]}
+                {(stock.symbol || "")[0]}
               </div>
               <div>
                 <div className="flex items-center gap-2 mb-1">

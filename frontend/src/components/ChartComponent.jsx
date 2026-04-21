@@ -11,7 +11,7 @@ export default function ChartComponent({ data, color = "#3b82f6" }) {
 
   // Contract is strict: { time, value }
   // Supports both 'time' and 'timestamp' for backend sync resilience
-  const processedData = data.map(d => {
+  const processedData = (data || []).map(d => {
     const rawTime = d.time || d.timestamp;
     return {
       ...d,

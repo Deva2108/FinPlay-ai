@@ -21,7 +21,6 @@ import IndexCard from '../components/IndexCard';
 import MarketInsightPanel from '../components/MarketInsightPanel';
 import NextEdgeCard from '../components/NextEdgeCard';
 
- 
 export default function Dashboard() {
   const { openStockPanel, recentlyViewed: allRecentlyViewed } = useStockPanel();
   const { marketMode, marketCode, setMarketMode } = useMarket();
@@ -30,20 +29,6 @@ export default function Dashboard() {
   const [indices, setIndices] = useState([]);
   const [trending, setTrending] = useState([]);
   const [loadingMarket, setLoadingMarket] = useState(true);
-
-  const [insightContent, setInsightContent] = useState(null);
-  const [marketInsightData, setMarketInsightData] = useState(null);
-  const [gameContext, setGameContext] = useState(null);
-  const [stripIndex, setStripIndex] = useState(0);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [lastDecision, setLastDecision] = useState(null);
-  
-  const debouncedSearch = useDebounce(searchQuery, 300);
-  const navigate = useNavigate();
-  const dropdownRef = useRef(null);
 
   const fetchMarketData = async () => {
     try {
@@ -64,18 +49,31 @@ export default function Dashboard() {
     fetchMarketData();
   }, [marketMode]);
 
-  const recentlyViewed = useMemo(() => (allRecentlyViewed || []).filter(s => s?.market === marketCode), [allRecentlyViewed, marketCode]);
-  const decisions = useMemo(() => (allDecisions || []).filter(d => d && d.stock && d.stock.market === marketCode), [allDecisions, marketCode]);
+  const [insightContent, setInsightContent] = useState(null);
+  const [marketInsightData, setMarketInsightData] = useState(null);
+  const [gameContext, setGameContext] = useState(null);
+  const [stripIndex, setStripIndex] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  const navigate = useNavigate();
+  const dropdownRef = useRef(null);
+
+  const [lastDecision, setLastDecision] = useState(null);
+
+  const recentlyViewed = useMemo(() => allRecentlyViewed.filter(s => s.market === marketCode), [allRecentlyViewed, marketCode]);
+  const decisions = useMemo(() => (allDecisions || []).filter(d => d.stock && d.stock.market === marketCode), [allDecisions, marketCode]);
 
   const missedOpportunities = useMemo(() => {
     return decisions.filter(d => d.choice === 'skip' && d.isCorrect === false).slice(0, 3);
   }, [decisions]);
 
   const objectives = useMemo(() => [
-    { title: "Daily Arena Clear", progress: (decisions?.length || 0) >= 5 ? 100 : ((decisions?.length || 0) / 5) * 100, icon: <Target size={12}/> },
-    { title: "Market Analysis", progress: (recentlyViewed?.length || 0) >= 3 ? 100 : ((recentlyViewed?.length || 0) / 3) * 100, icon: <Zap size={12}/> }
+    { title: "Daily Arena Clear", progress: decisions.length >= 5 ? 100 : (decisions.length / 5) * 100, icon: <Target size={12}/> },
+    { title: "Market Analysis", progress: recentlyViewed.length >= 3 ? 100 : (recentlyViewed.length / 3) * 100, icon: <Zap size={12}/> }
   ], [decisions, recentlyViewed]);
-
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -110,8 +108,8 @@ export default function Dashboard() {
   };
 
   const handleSearchKeyDown = (e) => {
-    if (e.key === 'Enter' && searchQuery?.trim()) {
-      navigate(`/stock/${(searchQuery || "").toUpperCase().trim()}`);
+    if (e.key === 'Enter' && searchQuery.trim()) {
+      navigate(`/stock/${searchQuery.toUpperCase().trim()}`);
       setShowDropdown(false);
     }
   };
@@ -126,12 +124,12 @@ export default function Dashboard() {
   const marketTone = marketMode === "INDIA" ? "bg-orange-500/5" : "bg-blue-500/5";
 
   const indiaData = {
-    indices: indices?.length > 0 && marketMode === "INDIA" ? indices : [
+    indices: indices.length > 0 && marketMode === "INDIA" ? indices : [
       { symbol: 'NIFTY 50', value: '22,453.80', change: '+124.50', percent: '+0.56%' },
       { symbol: 'SENSEX', value: '73,903.91', change: '+456.20', percent: '+0.62%' },
       { symbol: 'BANK NIFTY', value: '47,589.20', change: '-89.40', percent: '-0.19%' },
     ],
-    trending: trending?.length > 0 && marketMode === "INDIA" ? trending : [
+    trending: trending.length > 0 && marketMode === "INDIA" ? trending : [
       { symbol: 'RELIANCE', name: 'Reliance Industries', price: 2950.00, change: '+1.2%', market: 'IN' },
       { symbol: 'ZOMATO', name: 'Zomato Limited', price: 185.00, change: '+5.4%', market: 'IN' },
       { symbol: 'HDFC BANK', name: 'HDFC Bank Ltd', price: 1450.00, change: '-0.4%', market: 'IN' },
@@ -140,12 +138,12 @@ export default function Dashboard() {
   };
 
   const usData = {
-    indices: indices?.length > 0 && marketMode === "US" ? indices : [
+    indices: indices.length > 0 && marketMode === "US" ? indices : [
       { symbol: 'S&P 500', value: '5,204.34', change: '+56.21', percent: '+1.09%' },
       { symbol: 'NASDAQ', value: '16,396.83', change: '+245.12', percent: '+1.51%' },
       { symbol: 'DOW JONES', value: '39,170.24', change: '+12.44', percent: '+0.03%' },
     ],
-    trending: trending?.length > 0 && marketMode === "US" ? trending : [
+    trending: trending.length > 0 && marketMode === "US" ? trending : [
       { symbol: 'NVDA', name: 'NVIDIA Corp', price: 894.52, change: '+2.45%', market: 'US' },
       { symbol: 'TSLA', name: 'Tesla, Inc.', price: 175.22, change: '+1.05%', market: 'US' },
       { symbol: 'AAPL', name: 'Apple Inc.', price: 182.41, change: '-0.45%', market: 'US' },
@@ -164,7 +162,7 @@ export default function Dashboard() {
 
   const activeSmartData = marketMode === "INDIA" ? {
     insights: [
-      { title: "India's Retail Revolution", sub: "150M+ new investors entering the capital markets this year." },
+      { title: "India’s Retail Revolution", sub: "150M+ new investors entering the capital markets this year." },
       { title: "Green Energy Pivot", sub: "Reliance's $10B Infrastructure Plan gaining institutional trust." },
       { title: "Zomato Road to Profit", sub: "Food delivery margins hitting all-time high of 18%." },
       { title: "Banking Consolidation", sub: "HDFC Bank integration nearing full operational synergy." },
@@ -174,7 +172,7 @@ export default function Dashboard() {
     mood: "Strong momentum in Banking & Tech"
   } : {
     insights: [
-      { title: "AI Supercycle Peak", sub: "NVIDIA's Data Center revenue exceeds all previous benchmarks." },
+      { title: "AI Supercycle Peak", sub: "NVIDIA’s Data Center revenue exceeds all previous benchmarks." },
       { title: "Fed Interest Path", sub: "Market projects 3-rate stabilization through Q4 2024." },
       { title: "Apple Services Boom", sub: "High-margin App Store revenue offsetting hardware cycles." },
       { title: "Tesla Global Expansion", sub: "Gigafactory output hits record 5M unit run rate." },
@@ -234,13 +232,13 @@ export default function Dashboard() {
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl max-h-[400px] overflow-y-auto">
                       {isSearching ? <div className="p-8 text-center text-slate-500 text-[10px] font-black uppercase animate-pulse">Syncing...</div> : (
                         <div className="py-2">
-                          {(searchResults || []).map((result, idx) => (
+                          {searchResults.map((result, idx) => (
                             <div key={idx} onClick={() => handleResultClick(result.symbol)} className="px-5 py-3 flex items-center justify-between hover:bg-white/5 cursor-pointer group border-b border-white/[0.03] last:border-0">
                               <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-blue-500 text-xs group-hover:bg-blue-600 group-hover:text-white transition-all">{(result.symbol || "")[0]}</div>
+                                <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-blue-500 text-xs group-hover:bg-blue-600 group-hover:text-white transition-all">{result.symbol[0]}</div>
                                 <div><h5 className="text-sm font-black text-white group-hover:text-blue-400">{result.symbol}</h5><p className="text-[10px] text-slate-500 font-bold uppercase truncate max-w-[200px]">{result.name}</p></div>
                               </div>
-                              <span className="text-[9px] font-black text-slate-500 bg-white/5 px-2 py-1 rounded-lg">{result.stockExchange || ((result.symbol || "").includes('.') ? 'INDIA' : 'US')}</span>
+                              <span className="text-[9px] font-black text-slate-500 bg-white/5 px-2 py-1 rounded-lg">{result.stockExchange || (result.symbol.includes('.') ? 'INDIA' : 'US')}</span>
                             </div>
                           ))}
                         </div>
@@ -254,8 +252,8 @@ export default function Dashboard() {
            {/* Indices Scroller */}
            <div className="lg:col-span-6">
               <section className="bg-slate-900/40 p-1 rounded-2xl border border-slate-800/50">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1">
-                  {(activeData.indices || []).map((idx) => (
+                <div className="grid grid-cols-3 gap-1">
+                  {activeData.indices.map((idx) => (
                     <IndexCard 
                       key={idx.symbol}
                       {...idx}
@@ -295,13 +293,13 @@ export default function Dashboard() {
                 
                 {recentlyViewed.length > 0 ? (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {((recentlyViewed || []).slice(0, 4)).map((stock, i) => (
+                    {recentlyViewed.slice(0, 4).map((stock, i) => (
                       <div key={i} onClick={() => openStockPanel(stock)} className="p-4 rounded-2xl border border-slate-800 bg-slate-900/60 hover:bg-slate-800 transition-all cursor-pointer group shadow-lg">
                         <div className="flex justify-between items-start mb-2">
-                          <span className="text-white font-black text-xs group-hover:text-blue-400">{stock?.symbol}</span>
+                          <span className="text-white font-black text-xs group-hover:text-blue-400">{stock.symbol}</span>
                           <ArrowUpRight size={12} className="text-slate-600 group-hover:text-blue-400" />
                         </div>
-                        <p className="text-sm font-black text-white">{formatPrice(stock?.price, stock?.market)}</p>
+                        <p className="text-sm font-black text-white">{formatPrice(stock.price, stock.market)}</p>
                       </div>
                     ))}
                   </div>
@@ -325,10 +323,10 @@ export default function Dashboard() {
                    {/* Gainers */}
                    <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-4 space-y-3">
                       <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">🔥 Top Gainers</p>
-                      {(activeData.trending || []).filter(s => (s.change || "").startsWith('+')).slice(0, 2).map(stock => (
+                      {activeData.trending.filter(s => s.change.startsWith('+')).slice(0, 2).map(stock => (
                         <div key={stock.symbol} onClick={() => openStockPanel(stock)} className="flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 cursor-pointer transition-all group">
                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center font-black text-emerald-500 text-[10px]">{(stock.symbol || "")[0]}</div>
+                              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center font-black text-emerald-500 text-[10px]">{stock.symbol[0]}</div>
                               <span className="text-xs font-black text-white group-hover:text-emerald-400 transition-colors">{stock.symbol}</span>
                            </div>
                            <span className="text-xs font-black text-emerald-500">{stock.change}</span>
@@ -339,10 +337,10 @@ export default function Dashboard() {
                    {/* Losers */}
                    <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-4 space-y-3">
                       <p className="text-[9px] font-black text-rose-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">📉 Top Losers</p>
-                      {(activeData.trending || []).filter(s => (s.change || "").startsWith('-')).slice(0, 2).map(stock => (
+                      {activeData.trending.filter(s => s.change.startsWith('-')).slice(0, 2).map(stock => (
                         <div key={stock.symbol} onClick={() => openStockPanel(stock)} className="flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 cursor-pointer transition-all group">
                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center font-black text-rose-500 text-[10px]">{(stock.symbol || "")[0]}</div>
+                              <div className="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center font-black text-rose-500 text-[10px]">{stock.symbol[0]}</div>
                               <span className="text-xs font-black text-white group-hover:text-rose-400 transition-colors">{stock.symbol}</span>
                            </div>
                            <span className="text-xs font-black text-rose-500">{stock.change}</span>
@@ -387,7 +385,7 @@ export default function Dashboard() {
                  <HelpCircle size={12} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                </div>
                <div className="space-y-4">
-                  {(objectives || []).map((obj, i) => (
+                  {objectives.map((obj, i) => (
                     <div key={i} className="space-y-1.5">
                        <div className="flex justify-between text-[9px] font-bold">
                           <span className="text-slate-400 flex items-center gap-2">{obj.icon} {obj.title}</span>
@@ -409,23 +407,23 @@ export default function Dashboard() {
                     <h3 className="text-[10px] font-black text-white uppercase tracking-widest">Missed Growth</h3>
                   </div>
                   <div className="space-y-3">
-                     {(missedOpportunities || []).map((m, i) => (
+                     {missedOpportunities.map((m, i) => (
                        <div 
                          key={i} 
                          onClick={() => setInsightContent({
                            type: 'game',
-                           title: `Missed Opportunity: ${m?.stock?.symbol}`,
-                           explanation: `You skipped ${m?.stock?.symbol} in the arena recently. The stock subsequently rallied.`,
-                           data: [{ label: 'Missed Growth', value: m?.stock?.change, color: 'text-rose-400' }],
+                           title: `Missed Opportunity: ${m.stock.symbol}`,
+                           explanation: `You skipped ${m.stock.symbol} in the arena recently. The stock subsequently rallied.`,
+                           data: [{ label: 'Missed Growth', value: m.stock.change, color: 'text-rose-400' }],
                            insight: `System Analysis: Breakouts often follow consolidation patterns. Don't let a "boring" stock deter you if the technicals align.`,
-                           actions: [{ label: 'View Stock Deep Dive', primary: true, onClick: () => navigate(`/stock/${m?.stock?.symbol}`) }]
+                           actions: [{ label: 'View Stock Deep Dive', primary: true, onClick: () => navigate(`/stock/${m.stock.symbol}`) }]
                          })}
                          className="flex items-center justify-between p-3 bg-rose-500/5 border border-rose-500/10 rounded-xl group hover:bg-rose-500/10 transition-colors cursor-pointer"
                        >
                           <div className="flex items-center gap-3">
-                             <div className="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center font-black text-rose-500 text-[10px]">{(m?.stock?.symbol || "")[0]}</div>
+                             <div className="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center font-black text-rose-500 text-[10px]">{m.stock.symbol[0]}</div>
                              <div>
-                               <p className="text-[10px] font-black text-white group-hover:text-rose-400 transition-colors">{m?.stock?.symbol}</p>
+                               <p className="text-[10px] font-black text-white group-hover:text-rose-400 transition-colors">{m.stock.symbol}</p>
                                <p className="text-[8px] font-bold text-rose-400 uppercase">Rallied after skip</p>
                              </div>
                           </div>
@@ -444,7 +442,7 @@ export default function Dashboard() {
                 type: 'info',
                 title: 'Live Market Intelligence',
                 explanation: 'This dynamic feed pulls live market sentiment to guide your macro-level thinking.',
-                insight: activeSmartData?.insights?.[stripIndex]?.sub || "Loading live intelligence...",
+                insight: activeSmartData.insights[stripIndex].sub,
                 actions: [{ label: 'Dismiss' }]
               })}
             >
@@ -456,8 +454,8 @@ export default function Dashboard() {
                   <h3 className="text-white font-black text-xs uppercase tracking-widest">Market Feed</h3>
                 </div>
                 <div className="space-y-2">
-                   <h4 className="text-sm font-black text-white leading-tight">{activeSmartData?.insights?.[stripIndex]?.title || "Market Feed"}</h4>
-                   <p className="text-[11px] text-slate-400 font-medium leading-relaxed">{activeSmartData?.insights?.[stripIndex]?.sub || "Loading live intelligence..."}</p>
+                   <h4 className="text-sm font-black text-white leading-tight">{activeSmartData.insights[stripIndex].title}</h4>
+                   <p className="text-[11px] text-slate-400 font-medium leading-relaxed">{activeSmartData.insights[stripIndex].sub}</p>
                 </div>
                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest pt-2 flex items-center gap-1"><Zap size={10} style={{ color: accentColor }}/> Tap to analyze</p>
               </div>
@@ -471,3 +469,4 @@ export default function Dashboard() {
     </>
   );
 }
+

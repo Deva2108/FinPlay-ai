@@ -31,7 +31,16 @@ export default function Register() {
         setError('Registration failed.');
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed.');
+      const message =
+        err.response?.data?.message ||
+        err.response?.data ||
+        err.message ||
+        "Registration failed";
+
+      console.log("REGISTER FINAL ERROR:", message);
+      console.log("FULL ERROR:", err);
+
+      setError(message);
     } finally {
       setLoading(false);
     }

@@ -5,9 +5,12 @@ import { useLocation } from 'react-router-dom';
 import { useMarket } from '../context/MarketContext';
 import { explainStock, evaluateDecision, trackDecision } from '../services/api';
 import { useBehavior } from '../context/BehaviorContext';
+import { useGuide } from '../hooks/useGuide';
+import GuideOverlay from '../components/GuideOverlay';
 
 export default function LiveMarket() {
   const { marketMode, marketCode, currencySymbol } = useMarket();
+  const { currentStep, nextStep, setStep } = useGuide(1);
   const location = useLocation();
   const initialStock = location.state?.selectedStock || (marketMode === 'INDIA' ? 'RELIANCE' : 'AAPL');
   
@@ -46,31 +49,31 @@ export default function LiveMarket() {
     "Higher volume often confirms the trend."
   ];
 
-  const randomTip = useMemo(() => learningTips[Math.floor(Math.random() * learningTips.length)], [clickedPoint]);
+  const randomTip = useMemo(() => learningTips[Math.floor(Math.random() * (learningTips?.length || 1))], [clickedPoint]);
 
   const points = timeframe === '1W' 
     ? [2850, 2880, 2860, 2910, 2940, 2930, 2950]
     : [2700, 2750, 2800, 2780, 2850, 2900, 2950, 2920, 2980, 3000, 2950];
 
-  const max = Math.max(...points);
-  const min = Math.min(...points);
-  const range = max - min;
+  const max = Math.max(...((points?.length > 0 ? points : [0]) || [0]));
+  const min = Math.min(...((points?.length > 0 ? points : [0]) || [0]));
+  const range = (max - min) || 1;
   const width = 500;
   const height = 150;
 
   const getCoordinates = (index, value) => {
-    const x = (index / (points.length - 1)) * width;
+    const x = (index / ((points?.length - 1) || 1)) * width;
     const y = height - ((value - min) / range) * height;
     return { x, y };
   };
 
-  const svgPath = points.map((p, i) => {
+  const svgPath = (points || []).map((p, i) => {
     const { x, y } = getCoordinates(i, p);
     return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
   }).join(' ');
 
   const handleMouseMove = (e) => {
-    if (!svgRef.current) return;
+    if (!svgRef.current || !points || points.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * width;
     const index = Math.round((x / width) * (points.length - 1));
@@ -85,11 +88,21 @@ export default function LiveMarket() {
     });
   };
 
-  const handleGraphClick = () => {
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleGraphClick = async () => {
     if (hoveredPoint) {
       setClickedPoint(hoveredPoint);
+      setIsSyncing(true);
       setShowLearning(true);
       setAiInsight(null); // Clear previous AI insight for new point
+      
+      // Simulate magnetic lock-on feel
+      await new Promise(r => setTimeout(resolve => r(), 600));
+      setIsSyncing(false);
+      
+      if (currentStep === 1) nextStep();
+      
       setTimeout(() => setShowLearning(false), 3000);
     }
   };
@@ -97,12 +110,14 @@ export default function LiveMarket() {
   const handleAiExplain = async () => {
     if (isExplaining || !clickedPoint) return;
     setIsExplaining(true);
+    setIsSyncing(true);
     try {
       const result = await explainStock({
         symbol: passedStock,
         trend: clickedPoint.trend,
         action: decision || 'observing',
         lang: 'en',
+        type: 'graph_point',
         metrics: { price: clickedPoint.price }
       });
       setAiInsight(result.explanation);
@@ -111,6 +126,7 @@ export default function LiveMarket() {
       setAiInsight("Mentor sync required. Log in to access live market guidance.");
     } finally {
       setIsExplaining(false);
+      setIsSyncing(false);
     }
   };
 
@@ -122,7 +138,7 @@ export default function LiveMarket() {
       // 1. Emotive Evaluation
       const evalResult = await evaluateDecision({
         symbol: passedStock,
-        action: act.toUpperCase(),
+        action: (act || "").toUpperCase(),
         price: clickedPoint.price,
         isPositive: clickedPoint.trend === 'Rising'
       });
@@ -130,7 +146,7 @@ export default function LiveMarket() {
       // 2. Persistent Tracking
       await trackDecision({
         symbol: passedStock,
-        action: act.toUpperCase() === 'BUY' ? 'BUY' : 'SKIP',
+        action: (act || "").toUpperCase() === 'BUY' ? 'BUY' : 'SKIP',
         price: clickedPoint.price,
         market: marketCode,
         timestamp: new Date().toISOString()
@@ -140,6 +156,7 @@ export default function LiveMarket() {
       refreshInsights();
 
       setEvaluation(evalResult);
+      if (currentStep === 2) nextStep();
     } catch (err) {
       console.error("Decision evaluation/tracking failed:", err);
       setEvaluation({ outcome: 'neutral', message: "Decision logged locally. Log in to sync with your AI profile." });
@@ -172,13 +189,15 @@ export default function LiveMarket() {
         <div className="lg:col-span-8 space-y-8">
           
           {/* Interactive Graph */}
-          <div className="p-8 rounded-[2.5rem] bg-slate-900/40 border border-white/5 relative overflow-hidden group cursor-crosshair">
+          <div className={`p-8 rounded-[2.5rem] bg-slate-900/40 border border-white/5 relative overflow-hidden group cursor-crosshair transition-all duration-500 ${currentStep === 1 ? 'z-[201] ring-2 ring-blue-500/50 shadow-[0_0_50px_rgba(59,130,246,0.2)]' : ''}`}>
             <div className="absolute top-6 left-8 z-10 flex items-center gap-4">
                <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
                  <MousePointer2 size={12} /> Click graph to select point
                </p>
                {clickedPoint && (
-                 <motion.span initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black rounded-lg uppercase tracking-widest shadow-lg">POINT: ₹{clickedPoint.price}</motion.span>
+                 <motion.span initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className={`px-3 py-1 ${isSyncing ? 'bg-amber-600 animate-pulse' : 'bg-blue-600'} text-white text-[10px] font-black rounded-lg uppercase tracking-widest shadow-lg`}>
+                   {isSyncing ? 'Syncing Point...' : `POINT: ${currencySymbol}${clickedPoint.price}`}
+                 </motion.span>
                )}
             </div>
 
@@ -219,7 +238,12 @@ export default function LiveMarket() {
              </div>
 
              <AnimatePresence mode="wait">
-               {aiInsight ? (
+               {isSyncing ? (
+                 <motion.div key="syncing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-10 text-center bg-indigo-500/5 border border-dashed border-indigo-500/20 rounded-3xl">
+                    <Loader2 size={24} className="animate-spin text-indigo-500 mx-auto mb-4" />
+                    <p className="text-[10px] text-indigo-400 font-black uppercase tracking-[0.2em]">Syncing with Market Pulse...</p>
+                 </motion.div>
+               ) : aiInsight ? (
                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 rounded-3xl bg-indigo-500/5 border border-indigo-500/10 relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-4 opacity-5"><Sparkles size={60} className="text-indigo-400" /></div>
                     <div className="flex items-center gap-2 mb-3">
@@ -234,12 +258,15 @@ export default function LiveMarket() {
                            <div className="flex items-start gap-2 text-indigo-300">
                               <span className="text-lg">👀</span>
                               <div>
-                                <p className="text-[9px] font-black uppercase tracking-[0.2em] mb-1">Watch this:</p>
+                                <p className="text-[9px] font-black uppercase tracking-[0.2em] mb-1">
+                                  {(aiObservation || "").toLowerCase().includes('usually') || (aiInsight || "").toLowerCase().includes('happened') ? 'Next Step:' : 'Watch this:'}
+                                </p>
                                 <p className="text-xs font-bold leading-relaxed">{aiObservation}</p>
                               </div>
                            </div>
                         </div>
                       )}
+
                     </div>
                  </motion.div>
                ) : !clickedPoint ? (
@@ -257,14 +284,14 @@ export default function LiveMarket() {
               { label: "Stability", value: "High", sub: "Low Volatility" },
               { label: "Market Interest", value: "Strong", sub: "Bullish Sentiment" }
             ].map((n, i) => (
-              <div key={i} className="p-6 rounded-3xl bg-white/5 border border-white/5"><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{n.label}</p><p className="text-lg font-black text-white">{n.value}</p><p className="text-[9px] font-bold text-slate-600">{n.sub}</p></div>
+              <div key={i} className="p-6 rounded-3xl bg-white/5 border border-white/5"><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{n?.label}</p><p className="text-lg font-black text-white">{n?.value}</p><p className="text-[9px] font-bold text-slate-600">{n?.sub}</p></div>
             ))}
           </div>
         </div>
 
         {/* Action Sidebar */}
         <div className="lg:col-span-4">
-          <div className="p-8 rounded-[2.5rem] bg-slate-900 border border-white/10 sticky top-10 space-y-8">
+          <div className={`p-8 rounded-[2.5rem] bg-slate-900 border border-white/10 sticky top-10 space-y-8 transition-all duration-500 ${currentStep === 2 ? 'z-[201] ring-2 ring-blue-500/50 shadow-[0_0_50px_rgba(59,130,246,0.2)]' : ''}`}>
             <div>
               <h3 className="text-xl font-black text-white tracking-tight mb-2">Decision Point</h3>
               <p className="text-slate-500 text-sm font-medium">Every click is a lesson. What's your move?</p>
@@ -299,6 +326,24 @@ export default function LiveMarket() {
           </div>
         </div>
       </div>
+
+      {/* Reusable Guide Overlay */}
+      <GuideOverlay 
+        step={currentStep}
+        totalSteps={3}
+        active={currentStep < 4}
+        onDismiss={() => setStep(4)}
+        title={
+          currentStep === 1 ? "Step 1: Explore" :
+          currentStep === 2 ? "Step 2: Decide" :
+          "Step 3: Analyze"
+        }
+        content={
+          currentStep === 1 ? "Click any point on the graph to analyze a specific market moment." :
+          currentStep === 2 ? "Now, make a move! Buying or Waiting reveals the Mentor's secret logic." :
+          "Scroll down to see the AI analysis. The Market Mentor has decoded this move for you."
+        }
+      />
     </motion.div>
   );
 }

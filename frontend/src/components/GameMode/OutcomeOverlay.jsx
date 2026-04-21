@@ -1,17 +1,17 @@
 import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, ArrowRight, BookOpen, Target, Zap, ShieldCheck, Briefcase } from 'lucide-react';
+import { Trophy, ArrowRight, BookOpen, Target, Zap, ShieldCheck, Briefcase, Bot, Sparkles, BrainCircuit } from 'lucide-react';
 import { useBehavior } from '../../context/BehaviorContext';
 import { useTrading } from '../../context/TradingContext';
 import { getLearningInsight } from '../../utils/learningEngine';
 import MicroLearningCard from '../MicroLearningCard';
 
 const behavioralQuotes = [
-  "Patience is the investor's greatest weapon.",
-  "Don't trade on emotions, trade on evidence.",
-  "Small streaks build massive portfolios.",
-  "Risk is not the enemy, ignorance is.",
-  "The market is a machine for transferring wealth from the impatient to the patient."
+  "Observation is the investor's greatest weapon.",
+  "Markets reward clarity, not just action.",
+  "Every small decision builds your financial intuition.",
+  "Risk is manageable when understood.",
+  "The market is a system that values discipline over speed."
 ];
 
 export default function OutcomeOverlay({ stock, choice, gameStep, streak, onNext, onReset, result }) {

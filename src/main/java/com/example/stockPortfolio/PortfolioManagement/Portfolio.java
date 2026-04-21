@@ -22,4 +22,7 @@ public class Portfolio {
     @NotBlank(message = "PortfolioName is Required!")
     @Size(max = 60, message = "Maximum 60 letters!")
     private String portfolioName;
+
+    private Double balance;
+    private Double initialBalance;
 }

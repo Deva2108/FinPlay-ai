@@ -98,10 +98,11 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                       <p className="text-5xl font-black text-white tracking-tighter">{formatPrice(stock.price, stock.market)}</p>
                     </div>
                     <div className={`flex flex-col items-end gap-1`}>
-                      <div className={`flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-sm ${stock.change.startsWith('+') ? 'bg-emerald-500/10 text-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 'bg-rose-500/10 text-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.1)]'}`}>
-                        {stock.change.startsWith('+') ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                        {stock.change}
+                      <div className={`flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-sm ${(stock.change || "").startsWith('+') ? 'bg-emerald-500/10 text-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 'bg-rose-500/10 text-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.1)]'}`}>
+                        {(stock.change || "").startsWith('+') ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                        <span>{stock.change}</span>
                       </div>
+
                       <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Today's Move</p>
                     </div>
                   </div>

@@ -44,31 +44,41 @@ public class DecisionController {
         boolean isPositive = (boolean) request.getOrDefault("isPositive", true);
         String pattern = (String) request.getOrDefault("pattern", "balanced");
 
-        String outcome;
         String aiResponse;
+        String behaviorHighlight = "Pattern: " + pattern.toUpperCase();
 
         if (action.equalsIgnoreCase("BUY")) {
             if (isPositive) {
-                outcome = "good";
-                aiResponse = "That felt good, right? It always does. You caught the momentum, but don't let the dopamine cloud your judgment. Luck is a fickle friend.";
+                if (pattern.equalsIgnoreCase("aggressive")) {
+                    aiResponse = "Fast move. You’re striking while the momentum is clear, choosing participation over the risk of being left behind. Let’s see if this energy sustains the breakout.";
+                } else if (pattern.equalsIgnoreCase("cautious")) {
+                    aiResponse = "Interesting move. Even with your cautious style, you've seen enough strength to step in. Let’s see if the market rewards this moment of confidence.";
+                } else {
+                    aiResponse = "I see your thinking. This entry aligns with a balanced view of the current uptrend. Let's observe how the price reacts to the next resistance.";
+                }
             } else {
-                outcome = "risky";
-                aiResponse = "Not wrong. Just predictable. You bought the hype, not the trend. That ₹" + price + " could have bought you a lot of coffee while you waited for a better entry.";
+                if (pattern.equalsIgnoreCase("aggressive")) {
+                    aiResponse = "Interesting move. You’re betting on a fast reversal while others are still fearful. Let's see if your aggressive timing catches the bottom.";
+                } else {
+                    aiResponse = "I see your thinking. You’re looking for deep value during this decline, a move that requires significant patience. Let's see what happens next.";
+                }
             }
         } else {
             if (isPositive) {
-                outcome = "missed";
-                aiResponse = "You didn't lose money, you just repeated a pattern of hesitation. The market moved, you didn't. Safety is comfortable, but it's also expensive.";
+                if (pattern.equalsIgnoreCase("cautious")) {
+                    aiResponse = "Interesting move. Your cautious approach is keeping you safe as the market tests these highs. Let’s see if a better entry appears later.";
+                } else {
+                    aiResponse = "I see your thinking. Holding back during a rally suggests you’re waiting for a more disciplined entry point. Let’s see what happens next.";
+                }
             } else {
-                outcome = "neutral";
-                aiResponse = "Smart move. You dodged a bullet by doing absolutely nothing. Discipline is boring until you realize how much capital you just saved. Keep that chill energy.";
+                aiResponse = "Interesting move. Staying liquid during a decline shows a calm awareness of risk. Let’s see if the market finds a floor soon.";
             }
         }
 
         Map<String, String> response = new HashMap<>();
-        response.put("outcome", outcome);
+        response.put("outcome", isPositive && action.equalsIgnoreCase("BUY") ? "good" : !isPositive && action.equalsIgnoreCase("BUY") ? "risky" : "neutral");
         response.put("aiMessage", aiResponse);
-        response.put("behaviorHighlight", "Pattern: " + pattern.toUpperCase());
+        response.put("behaviorHighlight", behaviorHighlight);
         return response;
     }
 

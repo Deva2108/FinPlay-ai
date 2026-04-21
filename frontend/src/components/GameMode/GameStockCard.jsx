@@ -38,7 +38,7 @@ const pointVariants = {
 };
 
 export default function GameStockCard({ stock, onClick }) {
-  const analytics = useMemo(() => getAnalyticalDetails(stock), [stock.symbol]);
+  const analytics = useMemo(() => getAnalyticalDetails(stock), [stock?.symbol]);
 
   return (
     <motion.div 
@@ -82,7 +82,7 @@ export default function GameStockCard({ stock, onClick }) {
 
         <motion.div variants={itemVariants}>
           <p className="text-sm sm:text-base font-bold text-slate-200 leading-relaxed mb-1">
-            {analytics.expandedSituation}
+            {analytics?.expandedSituation}
           </p>
           <div className="h-px w-12 bg-blue-500/50 rounded-full" />
         </motion.div>
@@ -90,18 +90,19 @@ export default function GameStockCard({ stock, onClick }) {
         <motion.div variants={itemVariants} className="flex justify-between items-center py-5 border-y border-white/[0.05]">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl bg-slate-800 flex items-center justify-center font-black text-white text-xl border border-white/5 shadow-inner">
-              {stock.symbol[0]}
+              {(stock?.symbol || "")[0]}
             </div>
             <div>
-              <h3 className="text-3xl font-black text-white leading-none tracking-tight">{stock.symbol}</h3>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1.5">{stock.name}</p>
+              <h3 className="text-3xl font-black text-white leading-none tracking-tight">{stock?.symbol}</h3>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1.5">{stock?.name}</p>
             </div>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-black text-white tabular-nums tracking-tighter">{formatPrice(stock.price, stock.market)}</p>
-            <p className={`text-[10px] font-black px-2.5 py-1 rounded-lg mt-2 inline-block ${stock.change.startsWith('+') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
-              {stock.change}
+            <p className="text-2xl font-black text-white tabular-nums tracking-tighter">{formatPrice(stock?.price, stock?.market)}</p>
+            <p className={`text-[10px] font-black px-2.5 py-1 rounded-lg mt-2 inline-block ${(stock?.change || "").startsWith('+') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+              {stock?.change} Today
             </p>
+
           </div>
         </motion.div>
 
@@ -112,7 +113,7 @@ export default function GameStockCard({ stock, onClick }) {
             <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">System Thinking</span>
           </div>
           <div className="space-y-2.5">
-            {analytics.systemThinking.map((point, i) => (
+            {(analytics?.systemThinking || []).map((point, i) => (
               <motion.div 
                 key={i} 
                 custom={i}

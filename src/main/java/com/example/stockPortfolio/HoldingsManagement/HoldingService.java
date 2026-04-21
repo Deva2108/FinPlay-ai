@@ -13,6 +13,7 @@ public class HoldingService {
     private final HoldingRepo holdingRepo;
     private final TransactionRepo transactionRepo;
     private final FmpStockPriceService fmpService;
+    private final com.example.stockPortfolio.PortfolioManagement.PortfolioService portfolioService;
 
     @Transactional
     public void processTransaction(Transaction txn) {
@@ -23,8 +24,10 @@ public class HoldingService {
                 .findFirst();
 
         Holding holding = optionalHolding.orElse(null);
+        double transactionAmount = txn.getQuantity() * txn.getPrice();
 
         if (txn.getType() == Transaction.TransactionType.BUY) {
+            portfolioService.updateBalance(txn.getPortfolioId(), -transactionAmount);
             if (holding == null) {
                 holding = new Holding();
                 holding.setUserId(txn.getUserId());
@@ -45,6 +48,7 @@ public class HoldingService {
                 throw new IllegalArgumentException("Insufficient quantity to sell.");
             }
 
+            portfolioService.updateBalance(txn.getPortfolioId(), transactionAmount);
             holding.setQuantity(holding.getQuantity() - txn.getQuantity());
             if (holding.getQuantity() == 0) {
                 holdingRepo.delete(holding);

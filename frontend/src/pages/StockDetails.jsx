@@ -103,8 +103,36 @@ export default function StockDetails() {
     setTradeLoading(false);
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center font-black text-blue-500 animate-pulse">CONNECTING TO LIQUIDITY... ⚡</div>;
-  if (!quote) return <div className="h-screen flex items-center justify-center text-rose-500 font-bold">Failed to load market link for {symbol}</div>;
+  if (loading) {
+    return (
+      <div className="h-[80vh] w-full flex flex-col items-center justify-center gap-4">
+        <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+        <p className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] animate-pulse">Connecting to Liquidity... ⚡</p>
+      </div>
+    );
+  }
+
+  if (!quote) {
+    return (
+      <div className="h-[80vh] w-full flex flex-col items-center justify-center p-10 text-center">
+        <div className="p-8 bg-rose-500/5 border border-rose-500/20 rounded-[2.5rem] max-w-sm space-y-6">
+          <div className="w-16 h-16 bg-rose-500/10 rounded-2xl flex items-center justify-center mx-auto">
+             <AlertTriangle size={32} className="text-rose-500" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-black text-white uppercase tracking-tight">Sync Interrupted</h2>
+            <p className="text-slate-400 text-sm leading-relaxed">We couldn't bridge the live market link for <span className="text-white font-bold">{symbol}</span>. This usually happens during maintenance or rate limits.</p>
+          </div>
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full py-4 bg-rose-600 text-white font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-rose-500 transition-colors shadow-lg shadow-rose-900/20"
+          >
+            Re-establish Link
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const isUp = quote.changesPercentage >= 0;
 
@@ -118,7 +146,7 @@ export default function StockDetails() {
       insights.push({ icon: <Activity className="text-blue-500"/>, title: "Low Volatility Consolidation", text: `What you're seeing: The price is stable. Buyers and sellers are currently balanced.`, color: "bg-blue-500/10 border-blue-500/20 text-blue-400" });
     }
     
-    const hasNegativeNews = news.some(n => n.title.toLowerCase().match(/(drop|fall|loss|lawsuit|fail|crash)/));
+    const hasNegativeNews = news.some(n => (n.title || "").toLowerCase().match(/(drop|fall|loss|lawsuit|fail|crash)/));
     if (hasNegativeNews) {
       insights.push({ icon: <AlertTriangle className="text-amber-500"/>, title: "Risk Alert: Negative Sentiments", text: "Reason: Recent news headlines contain bearish keywords. Confidence: Medium", color: "bg-amber-500/10 border-amber-500/20 text-amber-400" });
     }
@@ -199,12 +227,12 @@ export default function StockDetails() {
                       </p>
                     </div>
                   </div>
-                  {generateInsights().map((insight, i) => (
+                  {(generateInsights() || []).map((insight, i) => (
                     <motion.div key={i} whileHover={{ scale: 1.01 }} className={`p-5 rounded-xl border flex items-start gap-4 ${insight.color} bg-opacity-10 backdrop-blur-md`}>
                       <div className="mt-1">{insight.icon}</div>
                       <div>
-                        <h5 className="font-black uppercase tracking-widest text-xs mb-1">{insight.title}</h5>
-                        <p className="text-sm font-medium opacity-90">{insight.text}</p>
+                        <h5 className="font-black uppercase tracking-widest text-xs mb-1">{insight?.title}</h5>
+                        <p className="text-sm font-medium opacity-90">{insight?.text}</p>
                       </div>
                     </motion.div>
                   ))}
@@ -215,11 +243,11 @@ export default function StockDetails() {
                 <motion.div key="news" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="glass-card p-6 border-slate-800 space-y-4">
                   <h4 className="text-slate-400 font-bold text-[10px] uppercase tracking-widest mb-4 flex items-center gap-2"><Newspaper size={14}/> Latest Headlines</h4>
                   <div className="space-y-4 max-h-[500px] overflow-y-auto no-scrollbar">
-                    {news && news.length > 0 ? news.map((n, i) => (
-                      <a key={i} href={n.url} target="_blank" rel="noopener noreferrer" className="block flex gap-4 p-4 border border-white/5 bg-white/[0.02] hover:bg-white/[0.05] rounded-xl transition-all group cursor-pointer hover:border-white/10">
+                    {news && (news || []).length > 0 ? (news || []).map((n, i) => (
+                      <a key={i} href={n?.url} target="_blank" rel="noopener noreferrer" className="block flex gap-4 p-4 border border-white/5 bg-white/[0.02] hover:bg-white/[0.05] rounded-xl transition-all group cursor-pointer hover:border-white/10">
                         <div className="flex flex-col justify-between">
-                          <p className="text-sm text-slate-200 font-bold line-clamp-2 leading-tight group-hover:text-blue-400 transition-colors">{n.headline}</p>
-                          <span className="text-[10px] text-slate-500 uppercase font-black tracking-widest mt-2 block">{n.source} • {new Date(n.datetime).toLocaleDateString()}</span>
+                          <p className="text-sm text-slate-200 font-bold line-clamp-2 leading-tight group-hover:text-blue-400 transition-colors">{n?.headline}</p>
+                          <span className="text-[10px] text-slate-500 uppercase font-black tracking-widest mt-2 block">{n?.source} • {n?.datetime ? new Date(n.datetime).toLocaleDateString() : 'Recent'}</span>
                         </div>
                       </a>
                     )) : (

@@ -36,17 +36,24 @@ public class UserService {
 
     @Transactional
     public UserModel register(UserModel userModel){
-        if(userRepo.existsByEmail(userModel.getEmail())){
+        System.out.println("Checking existence for email: " + userModel.getEmail());
+        boolean exists = userRepo.existsByEmail(userModel.getEmail());
+        System.out.println("Email exists: " + exists);
+        
+        if(exists){
             throw new UserNotFoundException("User already exists in our database");
         }else{
+            System.out.println("Encoding password for user: " + userModel.getName());
             userModel.setPassword(passwordEncoder.encode(userModel.getPassword()));
             UserModel savedUser = userRepo.save(userModel);
+            System.out.println("User saved with ID: " + savedUser.getUserId());
             
             // Auto-create initial portfolio for UX
             Portfolio defaultPortfolio = new Portfolio();
             defaultPortfolio.setUserId(savedUser.getUserId());
             defaultPortfolio.setPortfolioName("My Learning Portfolio 🎒");
             portfolioService.addPortfolio(defaultPortfolio);
+            System.out.println("Default portfolio created for user: " + savedUser.getUserId());
             
             return savedUser;
         }

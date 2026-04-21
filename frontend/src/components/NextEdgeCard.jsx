@@ -6,24 +6,25 @@ import { useTrading } from '../context/TradingContext';
 import { getLearningInsight } from '../utils/learningEngine';
 
 const NextEdgeCard = () => {
-  const { decisions, missedOpportunities } = useBehavior();
-  const { portfolio } = useTrading();
+  const { decisions = [], missedOpportunities = [] } = useBehavior();
+  const { portfolio = [] } = useTrading();
 
   const adaptiveInsight = useMemo(() => {
     return getLearningInsight({
-      decisions,
-      missedOpportunities,
-      holdings: portfolio,
-      totalCurrentValue: portfolio.reduce((sum, h) => sum + (h.currentValue || h.invested), 0)
+      decisions: decisions || [],
+      missedOpportunities: missedOpportunities || [],
+      holdings: portfolio || [],
+      totalCurrentValue: (portfolio || []).reduce((sum, h) => sum + (h.currentValue || h.invested || 0), 0)
     });
   }, [decisions, missedOpportunities, portfolio]);
 
   const stats = useMemo(() => {
-    const total = decisions.length;
+    const safeDecisions = decisions || [];
+    const total = safeDecisions.length;
     if (total === 0) return null;
 
-    const skips = decisions.filter(d => d.action === 'skip').length;
-    const buys = decisions.filter(d => d.action === 'buy').length;
+    const skips = safeDecisions.filter(d => d.action === 'skip').length;
+    const buys = safeDecisions.filter(d => d.action === 'buy').length;
     const skipRate = skips / total;
     const buyRate = buys / total;
 

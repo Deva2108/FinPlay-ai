@@ -34,7 +34,7 @@ const PortfolioFlowInsight = () => {
       </div>
 
       <div className="space-y-2.5">
-        {sectorData.map((sector) => (
+        {(sectorData || []).map((sector) => (
           <div key={sector.name} className="space-y-1">
             <div className="flex justify-between items-center text-[10px] font-medium">
               <span className="text-slate-400 opacity-70 uppercase tracking-wider">{sector.name}</span>

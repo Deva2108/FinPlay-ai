@@ -49,4 +49,10 @@ public class PortfolioController {
         System.out.println("Portfolio API hit - /all");
         return ResponseEntity.ok(portfolioService.getAllPortfolios());
     }
+
+    @PostMapping("/{id}/balance")
+    public ResponseEntity<Portfolio> updateBalance(@PathVariable Long id, @RequestBody java.util.Map<String, Double> payload) {
+        Double amount = payload.get("amount");
+        return ResponseEntity.ok(portfolioService.updateBalance(id, amount));
+    }
 }

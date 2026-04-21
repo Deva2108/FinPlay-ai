@@ -30,8 +30,8 @@ export default function ActionPanel({ onDecision, disabled, stock }) {
 
       <div className="grid grid-cols-2 gap-4">
         <motion.button
-          whileHover={{ scale: 1.02, translateY: -2 }}
-          whileTap={{ scale: 0.95 }}
+          whileHover={!disabled ? { scale: 1.02, translateY: -2 } : {}}
+          whileTap={!disabled ? { scale: 0.95 } : {}}
           transition={springConfig}
           onClick={() => onDecision('buy')}
           disabled={disabled}
@@ -39,14 +39,14 @@ export default function ActionPanel({ onDecision, disabled, stock }) {
         >
           <div className="flex items-center gap-2">
             <ShoppingCart size={18} />
-            <span className="font-black text-xs uppercase tracking-widest">Buy</span>
+            <span className="font-black text-xs uppercase tracking-widest">{disabled ? 'Analyzing...' : 'Buy'}</span>
           </div>
           <span className="text-[8px] font-black uppercase tracking-[0.2em] opacity-60 group-hover:opacity-100 transition-opacity">Trust the signal</span>
         </motion.button>
         
         <motion.button
-          whileHover={{ scale: 1.02, translateY: -2 }}
-          whileTap={{ scale: 0.95 }}
+          whileHover={!disabled ? { scale: 1.02, translateY: -2 } : {}}
+          whileTap={!disabled ? { scale: 0.95 } : {}}
           transition={springConfig}
           onClick={() => onDecision('skip')}
           disabled={disabled}
@@ -54,7 +54,7 @@ export default function ActionPanel({ onDecision, disabled, stock }) {
         >
           <div className="flex items-center gap-2">
             <SkipForward size={18} />
-            <span className="font-black text-xs uppercase tracking-widest">Skip</span>
+            <span className="font-black text-xs uppercase tracking-widest">{disabled ? 'Thinking...' : 'Skip'}</span>
           </div>
           <span className="text-[8px] font-black uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">Wait for clarity</span>
         </motion.button>

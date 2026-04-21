@@ -1,10 +1,12 @@
 import axios from 'axios';
 
-// Backend Base URL
-const BACKEND_URL = 'http://localhost:8080';
+// Backend Base URL from env or fallback
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+console.log("API URL FIXED:", API_BASE_URL);
 
 export const api = axios.create({
-  baseURL: BACKEND_URL,
+  baseURL: API_BASE_URL,
+  timeout: 5000,
 });
 
 // Interceptor for JWT
@@ -32,13 +34,17 @@ api.interceptors.response.use(
   }
 );
 
-// Auth APIs
+// Auth APIs (Using Configured Instance)
 export const registerUser = async (data) => {
   try {
-    const response = await api.post('/user/register', data);
-    return response.data.result || response.data;
-  } catch (error) {
-    throw error.response?.data?.message || error;
+    const res = await axios.post(`${API_BASE_URL}/user/register`, data);
+    console.log("REGISTER SUCCESS:", res.data);
+    return res.data;
+  } catch (err) {
+    console.log("REGISTER ERROR FULL:", err);
+    console.log("REGISTER ERROR RESPONSE:", err.response);
+    console.log("REGISTER ERROR DATA:", err.response?.data);
+    throw err;
   }
 };
 
@@ -50,12 +56,14 @@ export const loginUser = async (data) => {
     const response = await api.post('/user/login', data);
     const result = response.data.result || response.data;
     const token = typeof result === 'string' ? result : result?.token;
+    
     if (token) {
       localStorage.setItem('token', token);
     }
-    return response;
+    return response.data;
   } catch (error) {
-    throw error.response?.data?.message || error;
+    console.error("Login failed:", error);
+    throw error.response?.data?.message || error.message || "Login failed";
   }
 };
 
@@ -77,6 +85,15 @@ export const createPortfolio = async (name) => {
   try {
     const response = await api.post('/portfolios', { name });
     return response.data.result || response.data;
+  } catch (error) {
+    throw error.response?.data?.message || error;
+  }
+};
+
+export const updatePortfolioBalance = async (portfolioId, amount) => {
+  try {
+    const response = await api.post(`/portfolios/${portfolioId}/balance`, { amount });
+    return response.data;
   } catch (error) {
     throw error.response?.data?.message || error;
   }
@@ -278,6 +295,26 @@ export const evaluateDecision = async (evaluationData) => {
     return response.data;
   } catch (error) {
     console.error('evaluateDecision failed:', error);
+    throw error.response?.data?.message || error;
+  }
+};
+
+export const getOnboardingScenario = async (userType) => {
+  try {
+    const response = await api.post('/api/ai/onboarding/scenario', { userType });
+    return response.data;
+  } catch (error) {
+    console.error('getOnboardingScenario failed:', error);
+    throw error.response?.data?.message || error;
+  }
+};
+
+export const getOnboardingFeedback = async (choice, userType) => {
+  try {
+    const response = await api.post('/api/ai/onboarding/feedback', { choice, userType });
+    return response.data;
+  } catch (error) {
+    console.error('getOnboardingFeedback failed:', error);
     throw error.response?.data?.message || error;
   }
 };

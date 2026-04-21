@@ -34,14 +34,19 @@ const MarketInsights = [
 ];
 
 export default function Portfolio() {
-  const { balance, portfolio: allPortfolio, executeSell, lastAction, decisions: allDecisions, gameImpact } = useTrading();
+  const { balance, portfolio: allPortfolio, executeSell, lastAction, decisions: allDecisions, gameImpact, loading, refreshData } = useTrading();
   const { decisions: behaviorDecisions, missedOpportunities: behaviorMissed } = useBehavior();
   const { openStockPanel } = useStockPanel();
   const { marketCode } = useMarket();
   const navigate = useNavigate();
 
-  const portfolio = useMemo(() => allPortfolio.filter(p => p.market === marketCode), [allPortfolio, marketCode]);
-  const decisions = useMemo(() => (allDecisions || []).filter(d => d.stock && d.stock.market === marketCode), [allDecisions, marketCode]);
+  useEffect(() => {
+    refreshData();
+  }, [refreshData, marketCode]);
+
+  const portfolio = useMemo(() => (allPortfolio || []).filter(p => p && p.market === (marketCode === 'IN' ? 'INDIA' : marketCode)), [allPortfolio, marketCode]);
+
+  const decisions = useMemo(() => (allDecisions || []).filter(d => d && d.stock && d.stock.market === marketCode), [allDecisions, marketCode]);
 
   const [priceModifiers, setPriceModifiers] = useState({});
   const [lastTotalValue, setLastTotalValue] = useState(0);
@@ -60,7 +65,7 @@ export default function Portfolio() {
 
   const handlePortfolioAction = (type, stock) => {
     if (type === 'sell') {
-      const success = executeSell(stock.symbol, stock.currentValue);
+      const success = executeSell(stock.symbol, stock.currentValue, stock.quantity);
       if (success) {
         triggerFeedback(`Sold ${stock.symbol} position`, 'success');
         setIsStockPanelOpen(false);
@@ -78,54 +83,25 @@ export default function Portfolio() {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (portfolio.length === 0) return;
-    const interval = setInterval(() => {
-      setPriceModifiers(prev => {
-        const next = { ...prev };
-        portfolio.forEach(stock => {
-          const currentMod = next[stock.symbol] || 1;
-          const fluctuation = 1 + (Math.random() * 0.016 - 0.008); 
-          next[stock.symbol] = currentMod * fluctuation;
-        });
-        return next;
-      });
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [portfolio]);
-
   const { holdings, totalInvested, totalCurrentValue, totalGain, totalYield, allocation, portfolioMood, riskLevel, topStock } = useMemo(() => {
     const totalInvested = portfolio.reduce((acc, curr) => acc + curr.invested, 0);
     
-    const calculatedHoldings = portfolio.map(stock => {
-      const symbolHash = stock.symbol.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      const stableMockReturn = 1 + ((symbolHash % 20) / 200) - 0.05; 
-      
-      const modifier = priceModifiers[stock.symbol] || 1;
-      const currentValue = stock.invested * stableMockReturn * modifier;
-      const gainVal = currentValue - stock.invested;
-      const gainPct = (gainVal / stock.invested) * 100;
+    const calculatedHoldings = (portfolio || []).map(stock => ({
+      ...stock,
+      status: stock.gainVal >= 0 ? 'profit' : 'loss'
+    }));
 
-      return {
-        ...stock,
-        currentValue,
-        gainVal,
-        gainPct,
-        status: gainVal >= 0 ? 'profit' : 'loss'
-      };
-    });
-
-    const totalCurrentValue = calculatedHoldings.reduce((acc, curr) => acc + curr.currentValue, 0);
+    const totalCurrentValue = (calculatedHoldings || []).reduce((acc, curr) => acc + curr.currentValue, 0);
     const totalGain = totalCurrentValue - totalInvested;
     const totalYield = totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
-    const allocation = calculatedHoldings.map(h => ({ name: h.symbol, value: h.currentValue }));
+    const allocation = (calculatedHoldings || []).map(h => ({ name: h.symbol, value: h.currentValue }));
 
     let portfolioMood = 'Mixed';
     if (totalYield > 2) portfolioMood = 'Bullish';
     if (totalYield < -2) portfolioMood = 'Risky';
 
-    const riskLevel = calculatedHoldings.length === 0 ? 'None' : calculatedHoldings.length === 1 ? 'High' : calculatedHoldings.length <= 3 ? 'Moderate' : 'Balanced';
-    const topStock = allocation.length > 0 ? allocation.sort((a,b) => b.value - a.value)[0].name : '';
+    const riskLevel = (calculatedHoldings || []).length === 0 ? 'None' : (calculatedHoldings || []).length === 1 ? 'High' : (calculatedHoldings || []).length <= 3 ? 'Moderate' : 'Balanced';
+    const topStock = (allocation || []).length > 0 ? ((allocation || []).sort((a,b) => b.value - a.value)[0]?.name || '') : '';
 
     return {
       holdings: calculatedHoldings,
@@ -138,20 +114,20 @@ export default function Portfolio() {
       riskLevel,
       topStock
     };
-  }, [portfolio, priceModifiers]);
+  }, [portfolio]);
 
   const adaptiveInsight = useMemo(() => {
     return getLearningInsight({
-      decisions: behaviorDecisions,
-      missedOpportunities: behaviorMissed,
+      decisions: behaviorDecisions || [],
+      missedOpportunities: behaviorMissed || [],
       holdings,
       totalCurrentValue
     });
   }, [behaviorDecisions, behaviorMissed, holdings, totalCurrentValue]);
 
   const objectives = [
-    { title: "Diversify Sectors", progress: holdings.length >= 3 ? 100 : (holdings.length / 3) * 100, icon: <Shield size={14}/> },
-    { title: "Smart Decision Streak", progress: (decisions || []).filter(d => d.isCorrect).length >= 5 ? 100 : ((decisions || []).filter(d => d.isCorrect).length / 5) * 100, icon: <Zap size={14}/> },
+    { title: "Diversify Sectors", progress: (holdings?.length || 0) >= 3 ? 100 : ((holdings?.length || 0) / 3) * 100, icon: <Shield size={14}/> },
+    { title: "Smart Decision Streak", progress: (decisions || []).filter(d => d?.isCorrect).length >= 5 ? 100 : ((decisions || []).filter(d => d?.isCorrect).length / 5) * 100, icon: <Zap size={14}/> },
     { title: "Portfolio Health", progress: totalYield > 0 ? 100 : 0, icon: <Activity size={14}/> }
   ];
 
@@ -173,7 +149,7 @@ export default function Portfolio() {
 
   const handleSell = (e, stock) => {
     e.stopPropagation();
-    const success = executeSell(stock.symbol, stock.currentValue);
+    const success = executeSell(stock.symbol, stock.currentValue, stock.quantity);
     if (success) {
       triggerFeedback(`Sold ${stock.symbol} at ${formatPrice(stock.currentValue/stock.quantity, stock.market)}`, 'success');
     }
@@ -184,13 +160,13 @@ export default function Portfolio() {
       type: 'allocation',
       title: 'Portfolio Breakdown',
       explanation: 'Total value of all active holdings combined.',
-      data: holdings.map(h => ({
+      data: (holdings || []).map(h => ({
         label: h.symbol,
         value: formatPrice(h.currentValue, h.market),
         progress: totalCurrentValue > 0 ? (h.currentValue / totalCurrentValue) * 100 : 0,
         barColor: h.status === 'profit' ? '#10b981' : '#f43f5e'
       })),
-      insight: holdings.length === 1 
+      insight: (holdings || []).length === 1 
         ? "Concentrated in one asset. High volatility absorption."
         : "Portfolio is spread across assets. Risk is distributed.",
       actions: [{ label: 'View Allocation Chart', onClick: () => {} }]
@@ -357,7 +333,7 @@ export default function Portfolio() {
               </div>
 
               <div className="flex flex-col gap-4">
-                {holdings.map((stock) => (
+                {(holdings || []).map((stock) => (
                   <motion.div 
                     key={stock.symbol}
                     onClick={() => handlePortfolioStockClick(stock)}
@@ -367,7 +343,7 @@ export default function Portfolio() {
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
                       <div className="flex items-center gap-5 flex-1">
                         <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-lg border border-white/5 ${stock.status === 'profit' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                          {stock.symbol[0]}
+                          {(stock?.symbol || "")[0]}
                         </div>
                         <div className="space-y-0.5">
                           <h4 className="text-lg font-semibold text-white tracking-tight group-hover:text-blue-400 transition-colors">{stock.symbol}</h4>
@@ -471,16 +447,16 @@ export default function Portfolio() {
                   <h3 className="text-lg font-semibold text-white tracking-tight">Objectives</h3>
                </div>
                <div className="space-y-5">
-                  {objectives.map((obj, i) => (
+                  {(objectives || []).map((obj, i) => (
                     <div key={i} className="space-y-2">
                        <div className="flex justify-between items-center">
                           <span className="text-sm opacity-80 text-slate-300 uppercase tracking-widest">{obj.title}</span>
-                          <span className={`text-xs font-bold ${obj.progress === 100 ? "text-emerald-400" : "text-blue-400"}`}>
-                            {obj.progress === 100 ? <CheckCircle2 size={12}/> : `${obj.progress.toFixed(0)}%`}
+                          <span className={`text-xs font-bold ${obj?.progress === 100 ? "text-emerald-400" : "text-blue-400"}`}>
+                            {obj?.progress === 100 ? <CheckCircle2 size={12}/> : `${obj?.progress?.toFixed(0)}%`}
                           </span>
                        </div>
                        <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                          <motion.div initial={{ width: 0 }} animate={{ width: `${obj.progress}%` }} transition={{ duration: 1.5 }} className={`h-full rounded-full ${obj.progress === 100 ? "bg-emerald-500" : "bg-blue-500"}`} />
+                          <motion.div initial={{ width: 0 }} animate={{ width: `${obj?.progress}%` }} transition={{ duration: 1.5 }} className={`h-full rounded-full ${obj?.progress === 100 ? "bg-emerald-500" : "bg-blue-500"}`} />
                        </div>
                     </div>
                   ))}
@@ -493,7 +469,7 @@ export default function Portfolio() {
                   <ResponsiveContainer>
                     <PieChart>
                       <Pie data={allocation} innerRadius={35} outerRadius={50} paddingAngle={8} dataKey="value">
-                        {allocation.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />)}
+                        {(allocation || []).map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />)}
                       </Pie>
                     </PieChart>
                   </ResponsiveContainer>

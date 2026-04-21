@@ -90,7 +90,7 @@ export default function InsightPanel({ isOpen, onClose, content }) {
                     Data Breakdown
                   </h4>
                   <div className="space-y-2">
-                    {data.map((item, idx) => (
+                    {(data || []).map((item, idx) => (
                       <div key={idx} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-xl border border-white/5">
                         <span className="text-xs font-bold text-slate-300">{item.label}</span>
                         <span className={`text-sm font-black ${item.color || 'text-white'}`}>
@@ -106,7 +106,7 @@ export default function InsightPanel({ isOpen, onClose, content }) {
               {data && data.some(d => d.progress) && (
                 <section className="space-y-2">
                    <div className="h-2 w-full flex rounded-full overflow-hidden gap-0.5 bg-slate-800">
-                      {data.filter(d => d.progress).map((item, idx) => (
+                      {(data || []).filter(d => d.progress).map((item, idx) => (
                          <div 
                            key={idx} 
                            style={{ width: `${item.progress}%`, backgroundColor: item.barColor || '#3b82f6' }}
@@ -135,7 +135,7 @@ export default function InsightPanel({ isOpen, onClose, content }) {
               {/* Action Buttons */}
               {actions && actions.length > 0 && (
                 <section className="pt-4 border-t border-white/5 space-y-3">
-                  {actions.map((action, idx) => (
+                  {(actions || []).map((action, idx) => (
                     <button
                       key={idx}
                       onClick={() => {
