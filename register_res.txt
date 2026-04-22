@@ -1,0 +1,1 @@
+{"userId":4,"name":"Tester","email":"tester_unique_99@test.com","password":"$2a$10$UgxuUTpZ/wbDhs6pCx2LP.ip2WXJBK5wZiOauLBx4rafuNd4jbiye"}
