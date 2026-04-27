@@ -1,37 +1,54 @@
 package com.example.stockPortfolio.AlertManagement;
 
 import com.example.stockPortfolio.HoldingsManagement.FmpStockPriceService;
-import com.example.stockPortfolio.HoldingsManagement.HoldingService;
 import com.fasterxml.jackson.databind.JsonNode;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class AlertService {
 
-    @Autowired private AlertRepo alertRepo;
-    @Autowired private AlertHistoryRepo historyRepo;
-    @Autowired private FmpStockPriceService fmpService;
-    @Autowired private HoldingService holdingService;
+    private final AlertRepo alertRepo;
+    private final AlertHistoryRepo historyRepo;
+    private final FmpStockPriceService fmpService;
 
     private static final double RANGE_BUFFER = 0.01; // 1% buffer
     private static final long COOLDOWN_MINUTES = 60; // Don't re-trigger same alert for 1 hour
 
+    public List<AlertDataDTO> getAlertsByUserId(Long userId) {
+        return alertRepo.findByUserId(userId).stream()
+                .map(AlertDataDTO::fromEntity)
+                .collect(Collectors.toList());
+    }
+
+    public List<AlertHistory> getAlertHistoryByUserId(Long userId) {
+        return historyRepo.findByUserIdOrderByTriggeredAtDesc(userId);
+    }
+
     @Scheduled(fixedRate = 180000) // 3 mins
     public void runSmartAlertEngine() {
         List<Alert> alerts = alertRepo.findAll();
-        
+        if (alerts.isEmpty()) return;
+
         Set<String> uniqueSymbols = alerts.stream().map(Alert::getSymbol).collect(Collectors.toSet());
-        Map<String, JsonNode> quoteMap = new HashMap<>();
-        for (String symbol : uniqueSymbols) {
-            quoteMap.put(symbol, fmpService.getFullQuote(symbol));
-        }
+        
+        // Fetch all quotes in parallel
+        List<CompletableFuture<Void>> futures = uniqueSymbols.stream()
+            .map(symbol -> CompletableFuture.runAsync(() -> {
+                // The cache in fmpService will handle repeated calls efficiently
+                fmpService.getFullQuote(symbol);
+            }))
+            .collect(Collectors.toList());
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         for (Alert alert : alerts) {
             try {
@@ -40,8 +57,8 @@ public class AlertService {
                     continue;
                 }
 
-                JsonNode quote = quoteMap.get(alert.getSymbol());
-                if (quote == null) continue;
+                JsonNode quote = fmpService.getFullQuote(alert.getSymbol());
+                if (quote == null || !quote.has("price")) continue;
 
                 double currentPrice = quote.get("price").asDouble();
                 
@@ -59,7 +76,7 @@ public class AlertService {
     private void processUserAlert(Alert alert, double currentPrice) {
         if (alert.getTargetPrice() == null) return;
         
-        double target = alert.getTargetPrice();
+        double target = alert.getTargetPrice().doubleValue();
         double margin = target * RANGE_BUFFER;
         
         if (currentPrice >= (target - margin) && currentPrice <= (target + margin)) {
@@ -98,7 +115,6 @@ public class AlertService {
         alert.setLastTriggeredAt(LocalDateTime.now());
         alertRepo.save(alert);
 
-        // SAVE TO HISTORY
         AlertHistory history = new AlertHistory();
         history.setUserId(alert.getUserId());
         history.setSymbol(alert.getSymbol());
@@ -110,8 +126,19 @@ public class AlertService {
         log.info("ALERT TRIGGERED [{}]: {} for User {}", alert.getSymbol(), reason, alert.getUserId());
     }
 
+    public AlertDTO addAlert(AlertRequestDTO dto, Long userId) {
+        Alert alert = new Alert();
+        alert.setUserId(userId);
+        alert.setSymbol(dto.getSymbol().toUpperCase());
+        alert.setTargetPrice(dto.getTargetPrice());
+        if (dto.getAlertType() != null) {
+            alert.setAlertType(Alert.AlertType.valueOf(dto.getAlertType().toUpperCase()));
+        }
+        return addAlert(alert);
+    }
+
     public AlertDTO addAlert(Alert alert) {
-        double currentPrice = fmpService.getLatestPrice(alert.getSymbol());
+        double currentPrice = fmpService.getStockPrice(alert.getSymbol());
 
         if (currentPrice > 0) {
             alert.setLastTriggeredAt(null);

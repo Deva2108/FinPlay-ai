@@ -18,22 +18,16 @@ export default function Login() {
     setLoading(true);
 
     try {
-      console.log('LOGIN REQUEST:', email, password);
-
-      const response = await loginUser({
+      const data = await loginUser({
         email: email.trim(),
         password: password.trim()
       });
 
-      console.log('LOGIN SUCCESS:', response.data);
-
-      if (!response.data?.token) {
-        throw new Error('No token received');
+      if (data?.token) {
+        navigate('/dashboard');
+      } else {
+        throw new Error('Authentication failed');
       }
-
-      localStorage.setItem('token', response.data.token);
-
-      navigate('/dashboard');
 
     } catch (err) {
       console.error('LOGIN ERROR FULL:', err);

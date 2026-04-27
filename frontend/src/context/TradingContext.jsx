@@ -21,19 +21,17 @@ export function TradingProvider({ children }) {
     }
     
     try {
-      const portfoliosResponse = await getUserPortfolios();
-      const portfolioList = Array.isArray(portfoliosResponse) ? portfoliosResponse : (portfoliosResponse?.result || []);
+      const portfolioList = await getUserPortfolios();
       
-      if (portfolioList.length > 0) {
+      if (Array.isArray(portfolioList) && portfolioList.length > 0) {
         const primary = portfolioList[0];
         setActivePortfolioId(primary.portfolioId);
         setBalance(primary.balance || 100000);
         
-        const holdingsResponse = await getHoldings(primary.portfolioId);
-        const holdingsList = Array.isArray(holdingsResponse) ? holdingsResponse : (holdingsResponse?.result || []);
+        const holdingsList = await getHoldings(primary.portfolioId);
         
         // Map backend holdings to frontend format
-        const mappedPortfolio = (holdingsList || []).map(h => ({
+        const mappedPortfolio = (Array.isArray(holdingsList) ? holdingsList : []).map(h => ({
           symbol: h?.symbol,
           name: h?.companyName || h?.symbol,
           buyPrice: h?.buyPrice,

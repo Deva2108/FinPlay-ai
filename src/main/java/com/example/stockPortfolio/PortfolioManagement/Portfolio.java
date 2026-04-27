@@ -1,11 +1,8 @@
 package com.example.stockPortfolio.PortfolioManagement;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
+import com.example.stockPortfolio.UserManagement.User;
+import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -16,13 +13,14 @@ public class Portfolio {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long portfolioId;
     
-    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
-    private Long userId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
     
     @NotBlank(message = "PortfolioName is Required!")
     @Size(max = 60, message = "Maximum 60 letters!")
     private String portfolioName;
 
-    private Double balance;
-    private Double initialBalance;
+    private java.math.BigDecimal balance;
+    private java.math.BigDecimal initialBalance;
 }

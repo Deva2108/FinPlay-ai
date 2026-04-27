@@ -1,47 +1,53 @@
 package com.example.stockPortfolio.AiManagement;
 
 import com.example.stockPortfolio.AiManagement.service.GeminiService;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.example.stockPortfolio.HoldingsManagement.ApiResponse;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/ai/onboarding")
+@lombok.RequiredArgsConstructor
 public class OnboardingController {
 
-    @Autowired
-    private GeminiService geminiService;
+    private final GeminiService geminiService;
 
     @PostMapping("/scenario")
-    public Map<String, String> getScenario(@RequestBody Map<String, String> request) {
-        String userType = request.getOrDefault("userType", "STUDENT");
+    public ResponseEntity<ApiResponse<ScenarioResponseDTO>> getScenario(@RequestBody OnboardingRequestDTO request) {
+        String userType = request.getUserType() != null ? request.getUserType() : "STUDENT";
         String scenario = geminiService.getOnboardingScenario(userType);
         
-        Map<String, String> response = new HashMap<>();
-        response.put("scenario", scenario);
-        return response;
+        ScenarioResponseDTO response = ScenarioResponseDTO.builder().scenario(scenario).build();
+        return ResponseEntity.ok(ApiResponse.ok(response, "Scenario generated"));
     }
 
     @PostMapping("/feedback")
-    public Map<String, String> getFeedback(@RequestBody Map<String, String> request) {
-        String choice = request.getOrDefault("choice", "SPEND");
-        String userType = request.getOrDefault("userType", "STUDENT");
+    public ResponseEntity<ApiResponse<FeedbackResponseDTO>> getFeedback(@RequestBody OnboardingRequestDTO request) {
+        String choice = request.getChoice() != null ? request.getChoice() : "SPEND";
+        String userType = request.getUserType() != null ? request.getUserType() : "STUDENT";
         String feedback = geminiService.getOnboardingFeedback(choice, userType);
         
-        Map<String, String> response = new HashMap<>();
-        response.put("feedback", feedback);
-        return response;
+        FeedbackResponseDTO response = FeedbackResponseDTO.builder().feedback(feedback).build();
+        return ResponseEntity.ok(ApiResponse.ok(response, "Feedback generated"));
+    }
+
+    @GetMapping("/scenarios")
+    public ResponseEntity<ApiResponse<MarketScenarioResponseDTO>> getScenarios(@RequestParam(defaultValue = "INDIA") String marketType) {
+        List<Map<String, Object>> scenarios = geminiService.generateMarketScenarios(marketType);
+        MarketScenarioResponseDTO response = MarketScenarioResponseDTO.builder().scenarios(scenarios).build();
+        return ResponseEntity.ok(ApiResponse.ok(response, "Dynamic scenarios generated"));
     }
 
     @PostMapping("/summary")
-    public Map<String, String> getSummary(@RequestBody Map<String, Object> request) {
-        java.util.List<Map<String, Object>> decisions = (java.util.List<Map<String, Object>>) request.get("decisions");
+    public ResponseEntity<ApiResponse<DiagnosisResponseDTO>> getSummary(@RequestBody OnboardingRequestDTO request) {
+        List<Map<String, Object>> decisions = request.getDecisions();
         String diagnosis = geminiService.getArenaSummary(decisions);
         
-        Map<String, String> response = new HashMap<>();
-        response.put("diagnosis", diagnosis);
-        return response;
+        DiagnosisResponseDTO response = DiagnosisResponseDTO.builder().diagnosis(diagnosis).build();
+        return ResponseEntity.ok(ApiResponse.ok(response, "Arena summary generated"));
     }
 }

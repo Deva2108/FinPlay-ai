@@ -1,7 +1,8 @@
 package com.example.stockPortfolio.HoldingsManagement;
 
-import com.example.stockPortfolio.UserManagement.UserModel;
+import com.example.stockPortfolio.UserManagement.User;
 import com.example.stockPortfolio.UserManagement.UserService;
+import com.example.stockPortfolio.PortfolioManagement.PortfolioService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -14,23 +15,28 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/holdings")
-@Tag(name="3. Holding", description = "3rd Controller, User can add Holdings")
+@Tag(name="3. Holding", description = "Holding Management Controller")
 @RequiredArgsConstructor
 @Slf4j
 public class HoldingController {
 
     private final HoldingService holdingService;
     private final UserService userService;
+    private final PortfolioService portfolioService;
 
     private Long getLoggedInUserId() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        UserModel user = userService.getUserByEmail(email);
+        User user = userService.getUserByEmail(email);
         return user.getUserId();
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponse<Transaction>> recordTransaction(@Valid @RequestBody TransactionDTO dto) {
+    public ResponseEntity<ApiResponse<TransactionDTO>> recordTransaction(@Valid @RequestBody TransactionDTO dto) {
         Long userId = getLoggedInUserId();
+        
+        // Security Check: Ensure portfolio belongs to user
+        portfolioService.validatePortfolioOwnership(dto.getPortfolioId(), userId);
+        
         log.info("Processing {} transaction for user {} symbol {}", dto.getType(), userId, dto.getSymbol());
         
         Transaction txn = new Transaction();
@@ -41,26 +47,49 @@ public class HoldingController {
         txn.setPrice(dto.getPrice());
         txn.setTransactionDate(LocalDateTime.now());
         txn.setType(Transaction.TransactionType.valueOf(dto.getType().toUpperCase()));
+        txn.setNotes(dto.getNotes());
+        if (dto.getPaymentStatus() != null) {
+            txn.setPaymentStatus(Transaction.PaymentStatus.valueOf(dto.getPaymentStatus().toUpperCase()));
+        }
 
         holdingService.processTransaction(txn);
-        return ResponseEntity.ok(new ApiResponse<>(txn, 200, "Transaction recorded successfully"));
+
+        TransactionDTO responseDto = new TransactionDTO();
+        responseDto.setTransactionId(txn.getTransactionId());
+        responseDto.setUserId(txn.getUserId());
+        responseDto.setPortfolioId(txn.getPortfolioId());
+        responseDto.setSymbol(txn.getSymbol());
+        responseDto.setQuantity(txn.getQuantity());
+        responseDto.setPrice(txn.getPrice());
+        responseDto.setTransactionDate(txn.getTransactionDate());
+        responseDto.setType(txn.getType().name());
+        responseDto.setNotes(txn.getNotes());
+        responseDto.setPaymentStatus(txn.getPaymentStatus() != null ? txn.getPaymentStatus().name() : null);
+
+        return ResponseEntity.ok(ApiResponse.ok(responseDto, "Transaction recorded successfully"));
     }
 
     @GetMapping("/transactions")
     public ResponseEntity<ApiResponse<List<TransactionDTO>>> getTransactions(@RequestParam Long portfolioId) {
-        List<TransactionDTO> transactions = holdingService.getAllTransactions(getLoggedInUserId(), portfolioId);
-        return ResponseEntity.ok(new ApiResponse<>(transactions, 200, "Transactions fetched successfully"));
+        Long userId = getLoggedInUserId();
+        portfolioService.validatePortfolioOwnership(portfolioId, userId);
+        
+        List<TransactionDTO> transactions = holdingService.getAllTransactions(userId, portfolioId);
+        return ResponseEntity.ok(ApiResponse.ok(transactions, "Transactions fetched successfully"));
     }
 
     @GetMapping
     public ResponseEntity<ApiResponse<HoldingResponseDTO>> getHoldings(@RequestParam Long portfolioId) {
-        HoldingResponseDTO response = holdingService.getHoldingsWithDetails(getLoggedInUserId(), portfolioId);
-        return ResponseEntity.ok(new ApiResponse<>(response, 200, "Holdings fetched successfully"));
+        Long userId = getLoggedInUserId();
+        portfolioService.validatePortfolioOwnership(portfolioId, userId);
+        
+        HoldingResponseDTO response = holdingService.getHoldingsWithDetails(userId, portfolioId);
+        return ResponseEntity.ok(ApiResponse.ok(response, "Holdings fetched successfully"));
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<String>> deleteHolding(@PathVariable Long id) {
-        holdingService.deleteHolding(id);
-        return ResponseEntity.ok(new ApiResponse<>("Holding deleted successfully", 200, "Success"));
+        holdingService.deleteHolding(id, getLoggedInUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Holding deleted successfully", "Success"));
     }
 }

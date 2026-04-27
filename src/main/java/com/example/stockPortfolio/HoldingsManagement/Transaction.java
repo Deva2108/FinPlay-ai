@@ -25,14 +25,41 @@ public class Transaction {
     @NotNull
     private int quantity;
     @DecimalMin(value = "0.01")
-    private double price;
+    private java.math.BigDecimal price;
     @NotNull
     private LocalDateTime transactionDate;
 
     @Enumerated(EnumType.STRING)
     private TransactionType type;
 
+    @Enumerated(EnumType.STRING)
+    private PaymentStatus paymentStatus = PaymentStatus.PAID;
+
+    @Column(columnDefinition = "TEXT")
+    private String notes;
+
+    @Column(updatable = false)
+    private LocalDateTime createdAt;
+    
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now();
+        if (transactionDate == null) transactionDate = LocalDateTime.now();
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
+
     public enum TransactionType {
         BUY, SELL
+    }
+
+    public enum PaymentStatus {
+        PAID, UNPAID
     }
 }

@@ -1,5 +1,6 @@
 package com.example.stockPortfolio.UserManagement;
 
+import com.example.stockPortfolio.HoldingsManagement.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.http.ResponseEntity;
@@ -14,7 +15,7 @@ public class CacheAdminController {
 
     @DeleteMapping("/clear")
     @CacheEvict(value = "stockPrices", allEntries = true)
-    public ResponseEntity<String> clearStockCache() {
-        return ResponseEntity.ok("Stock prices cache cleared successfully.");
+    public ResponseEntity<ApiResponse<String>> clearStockCache() {
+        return ResponseEntity.ok(ApiResponse.ok("Stock prices cache cleared successfully.", "Success"));
     }
 }

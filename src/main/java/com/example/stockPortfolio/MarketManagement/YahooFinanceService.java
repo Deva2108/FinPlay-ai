@@ -1,5 +1,6 @@
 package com.example.stockPortfolio.MarketManagement;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -13,9 +14,10 @@ import java.util.*;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class YahooFinanceService {
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
     private final String BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart/";
 
     public List<Map<String, Object>> getHistoricalData(String symbol) {

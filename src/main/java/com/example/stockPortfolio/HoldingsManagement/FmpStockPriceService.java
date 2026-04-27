@@ -1,6 +1,7 @@
 package com.example.stockPortfolio.HoldingsManagement;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
@@ -8,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 @Service
+@RequiredArgsConstructor
 @Slf4j
 public class FmpStockPriceService {
 
@@ -17,10 +19,10 @@ public class FmpStockPriceService {
     @Value("${stock.api.base-url}")
     private String baseUrl;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
     @Cacheable(value = "stockPrices", key = "#symbol.toUpperCase()", unless = "#result == null || #result <= 0")
-    public double getLatestPrice(String symbol) {
+    public Double getStockPrice(String symbol) {
         log.info("CACHE MISS: Fetching stock price from FMP API for {}", symbol.toUpperCase());
         String url = String.format("%s/quote/%s?apikey=%s", baseUrl, symbol.toUpperCase(), apiKey);
         try {
@@ -37,7 +39,7 @@ public class FmpStockPriceService {
         return 0.0; 
     }
 
-    @Cacheable(value = "stockQuotes", key = "#symbol.toUpperCase()", unless = "#result == null")
+    @Cacheable(value = "fmpStockQuotes", key = "#symbol.toUpperCase()", unless = "#result == null")
     public JsonNode getFullQuote(String symbol) {
         log.info("CACHE MISS: Fetching full quote from FMP API for {}", symbol.toUpperCase());
         String url = String.format("%s/quote/%s?apikey=%s", baseUrl, symbol.toUpperCase(), apiKey);

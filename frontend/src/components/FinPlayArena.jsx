@@ -32,18 +32,38 @@ const usArenaStocks = [
   { symbol: 'META', name: 'Meta Platforms', price: 505.00, market: 'US', change: '+0.5%', situation: 'Llama 3 open-source release.', context: 'AI model becoming the industry standard for devs.', impact: '+4.2%', isPositive: true, explanation: 'Platform dominance through AI positioning.' }
 ];
 
-import { trackDecision, getDecisionStats, api } from '../services/api';
+import { trackDecision, getDecisionStats, getArenaSummary, getArenaScenarios, api } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onShowInsight, context }) {
   if (!marketMode) console.warn("FinPlayArena: marketMode is missing, defaulting to INDIA");
   const navigate = useNavigate();
-  const stocks = marketMode === "INDIA" ? indiaArenaStocks : usArenaStocks;
+  const [stocks, setStocks] = useState(marketMode === "INDIA" ? indiaArenaStocks : usArenaStocks);
+  const [loadingScenarios, setLoadingScenarios] = useState(true);
+  
   const { balance, executeBuy, recordGameResult } = useTrading();
   const { recordDecision, addMissedOpportunity, decisions, missedOpportunities: behaviorMissed, refreshInsights } = useBehavior();
   
-  const [currentIdx, setCurrentIdx] = useState(() => Math.floor(Math.random() * stocks.length));
+  const [currentIdx, setCurrentIdx] = useState(0);
   const [gameStep, setGameStep] = useState('DECISION'); 
+
+  useEffect(() => {
+    const fetchScenarios = async () => {
+      setLoadingScenarios(true);
+      try {
+        const dynamicStocks = await getArenaScenarios(marketMode);
+        if (dynamicStocks && dynamicStocks.length > 0) {
+          setStocks(dynamicStocks);
+        }
+      } catch (err) {
+        console.error("Failed to fetch dynamic scenarios, using fallbacks", err);
+      } finally {
+        setLoadingScenarios(false);
+      }
+    };
+    fetchScenarios();
+  }, [marketMode]);
+
   const [quickFlash, setQuickFlash] = useState(null); 
   const [floatingFeedback, setFloatingFeedback] = useState(null);
   const [toast, setToast] = useState(null);
@@ -57,7 +77,22 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
   const [streak, setStreak] = useState(0);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
-  const [lastResult, setLastResult] = useState(null); // { amount, type }
+  const [lastResult, setLastResult] = useState(null); 
+
+  const [insightScore, setInsightScore] = useState(() => parseInt(localStorage.getItem('insightScore') || '0', 10));
+
+  useEffect(() => {
+    const handleStorage = () => {
+      setInsightScore(parseInt(localStorage.getItem('insightScore') || '0', 10));
+    };
+    window.addEventListener('storage', handleStorage);
+    // Also poll slightly because localStorage events don't fire in the same tab
+    const interval = setInterval(handleStorage, 2000);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      clearInterval(interval);
+    };
+  }, []);
 
   const { openStockPanel, isOpen: isPanelOpen } = useStockPanel();
   const currentStock = stocks[currentIdx];
@@ -70,14 +105,6 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
       handleNext();
     }
   };
-
-  useEffect(() => {
-    if (context) {
-      console.log("Game loaded with context:", context);
-    }
-  }, [context]);
-
-  useEffect(() => { restartGame(); }, [marketMode]);
 
   const [roundDecisions, setRoundDecisions] = useState([]);
   const ROUND_LIMIT = 5;
@@ -116,8 +143,8 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
   const generateDiagnosis = async (history) => {
     setIsDiagnosing(true);
     try {
-      const res = await api.post('/api/ai/arena/summary', { decisions: history });
-      setDiagnosis(res.data.diagnosis);
+      const result = await getArenaSummary(history);
+      setDiagnosis(result?.diagnosis);
     } catch (err) {
       setDiagnosis("Your patterns show a mix of caution and momentum. You're building a balanced eye for market entries.");
     } finally {
@@ -136,7 +163,18 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
   };
 
   const restartGame = () => {
-    setCurrentIdx(Math.floor(Math.random() * stocks.length));
+    const fetchScenarios = async () => {
+      setLoadingScenarios(true);
+      try {
+        const dynamicStocks = await getArenaScenarios(marketMode);
+        if (dynamicStocks && dynamicStocks.length > 0) {
+          setStocks(dynamicStocks);
+        }
+      } catch (err) {}
+      setLoadingScenarios(false);
+    };
+    fetchScenarios();
+    setCurrentIdx(0);
     setGameStep('DECISION');
     setUserChoice(null);
     setScore(0);
@@ -155,6 +193,15 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
       holdings: [], 
     });
   }, [isGameOver, decisions, behaviorMissed, stocks?.length]);
+
+  if (loadingScenarios) {
+    return (
+      <div className="h-96 flex flex-col items-center justify-center gap-4">
+        <Loader2 size={32} className="animate-spin text-blue-500" />
+        <p className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em]">AI Generating Market Scenarios...</p>
+      </div>
+    );
+  }
 
   if (isGameOver) {
     return (
@@ -190,7 +237,11 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Real-time behavior training</p>
           </div>
         </div>
-        <div className="flex items-center gap-6 bg-slate-900/40 border border-slate-800 px-6 py-3 rounded-2xl">
+        <div className="flex items-center gap-4 bg-slate-900/40 border border-slate-800 px-6 py-3 rounded-2xl shadow-lg">
+          <div className="flex flex-col items-center px-4 border-r border-white/5">
+            <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">Insights</span>
+            <span className="text-sm font-black text-white">{insightScore}</span>
+          </div>
           <div className="flex flex-col items-end">
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1.5">Streak</span>
             <span className="text-sm font-black text-emerald-500 leading-none">{streak}🔥</span>

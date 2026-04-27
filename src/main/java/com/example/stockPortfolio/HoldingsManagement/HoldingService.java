@@ -6,6 +6,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import java.util.concurrent.CompletableFuture;
+
 @Service
 @RequiredArgsConstructor
 public class HoldingService {
@@ -24,10 +26,10 @@ public class HoldingService {
                 .findFirst();
 
         Holding holding = optionalHolding.orElse(null);
-        double transactionAmount = txn.getQuantity() * txn.getPrice();
+        double transactionAmount = txn.getQuantity() * txn.getPrice().doubleValue();
 
         if (txn.getType() == Transaction.TransactionType.BUY) {
-            portfolioService.updateBalance(txn.getPortfolioId(), -transactionAmount);
+            portfolioService.updateBalance(txn.getPortfolioId(), java.math.BigDecimal.valueOf(-transactionAmount), txn.getUserId());
             if (holding == null) {
                 holding = new Holding();
                 holding.setUserId(txn.getUserId());
@@ -37,9 +39,9 @@ public class HoldingService {
                 holding.setBuyPrice(txn.getPrice());
             } else {
                 int totalQty = holding.getQuantity() + txn.getQuantity();
-                double newAvgPrice = ((holding.getBuyPrice() * holding.getQuantity()) +
-                        (txn.getPrice() * txn.getQuantity())) / totalQty;
-                holding.setBuyPrice(newAvgPrice);
+                double newAvgPrice = ((holding.getBuyPrice().doubleValue() * holding.getQuantity()) +
+                        (txn.getPrice().doubleValue() * txn.getQuantity())) / totalQty;
+                holding.setBuyPrice(java.math.BigDecimal.valueOf(newAvgPrice));
                 holding.setQuantity(totalQty);
             }
             holdingRepo.save(holding);
@@ -48,7 +50,7 @@ public class HoldingService {
                 throw new IllegalArgumentException("Insufficient quantity to sell.");
             }
 
-            portfolioService.updateBalance(txn.getPortfolioId(), transactionAmount);
+            portfolioService.updateBalance(txn.getPortfolioId(), java.math.BigDecimal.valueOf(transactionAmount), txn.getUserId());
             holding.setQuantity(holding.getQuantity() - txn.getQuantity());
             if (holding.getQuantity() == 0) {
                 holdingRepo.delete(holding);
@@ -61,36 +63,77 @@ public class HoldingService {
 
     public HoldingResponseDTO getHoldingsWithDetails(Long userId, Long portfolioId) {
         List<Holding> holdings = holdingRepo.findByUserIdAndPortfolioId(userId, portfolioId);
-        List<HoldingStatusDTO> statusList = new ArrayList<>();
-        double totalValue = 0.0;
+        
+        List<CompletableFuture<HoldingStatusDTO>> futures = holdings.stream()
+            .map(h -> CompletableFuture.supplyAsync(() -> {
+                com.fasterxml.jackson.databind.JsonNode quote = fmpService.getFullQuote(h.getSymbol());
+                if (quote != null && quote.has("price")) {
+                    double currentPrice = quote.get("price").asDouble();
+                    HoldingStatusDTO dto = new HoldingStatusDTO();
+                    dto.setSymbol(h.getSymbol());
+                    dto.setCompanyName(quote.has("name") ? quote.get("name").asText() : "N/A");
+                    dto.setSector("N/A");
+                    dto.setQuantity(h.getQuantity());
+                    dto.setBuyPrice(h.getBuyPrice());
+                    dto.setCurrentPrice(java.math.BigDecimal.valueOf(currentPrice));
 
-        for (Holding h : holdings) {
-            com.fasterxml.jackson.databind.JsonNode quote = fmpService.getFullQuote(h.getSymbol());
+                    double gain = (currentPrice - h.getBuyPrice().doubleValue()) * h.getQuantity();
+                    dto.setGain(java.math.BigDecimal.valueOf(gain));
+                    dto.setGainPercentage(java.math.BigDecimal.valueOf((gain / (h.getBuyPrice().doubleValue() * h.getQuantity())) * 100));
+                    return dto;
+                }
+                return null;
+            }))
+            .collect(Collectors.toList());
 
-            if (quote != null && quote.has("price")) {
-                double currentPrice = quote.get("price").asDouble();
-                HoldingStatusDTO dto = new HoldingStatusDTO();
-                dto.setSymbol(h.getSymbol());
-                dto.setCompanyName(quote.has("name") ? quote.get("name").asText() : "N/A");
-                dto.setSector("N/A");
-                dto.setQuantity(h.getQuantity());
-                dto.setBuyPrice(h.getBuyPrice());
-                dto.setCurrentPrice(currentPrice);
+        List<HoldingStatusDTO> statusList = futures.stream()
+            .map(CompletableFuture::join)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toList());
 
-                double gain = (currentPrice - h.getBuyPrice()) * h.getQuantity();
-                dto.setGain(gain);
-                dto.setGainPercentage((gain / (h.getBuyPrice() * h.getQuantity())) * 100);
+        double totalValue = statusList.stream()
+            .mapToDouble(dto -> dto.getCurrentPrice().doubleValue() * dto.getQuantity())
+            .sum();
 
-                totalValue += currentPrice * h.getQuantity();
-                statusList.add(dto);
-            }
-        }
-
-        return new HoldingResponseDTO(statusList, totalValue, 200, "Live FMP holdings fetched.");
+        return new HoldingResponseDTO(statusList, totalValue, 200, "Live FMP holdings fetched in parallel.");
     }
 
     public List<TransactionDTO> getAllTransactions(Long userId, Long portfolioId) {
         List<Transaction> allTransactions = transactionRepo.findByUserIdAndPortfolioIdOrderByTransactionDateDesc(userId, portfolioId);
+        
+        // Rolling average map: Symbol -> [TotalQuantity, TotalCost]
+        Map<String, double[]> rollingAvgs = new HashMap<>();
+        
+        // We need them in chronological order to calculate rolling average correctly
+        List<Transaction> chronological = allTransactions.stream()
+            .sorted(Comparator.comparing(Transaction::getTransactionDate))
+            .collect(Collectors.toList());
+
+        Map<Long, Double> transactionGains = new HashMap<>();
+        Map<Long, Double> transactionGainPercentages = new HashMap<>();
+
+        for (Transaction txn : chronological) {
+            String symbol = txn.getSymbol().toUpperCase();
+            double[] stats = rollingAvgs.computeIfAbsent(symbol, k -> new double[]{0.0, 0.0});
+            
+            if (txn.getType() == Transaction.TransactionType.BUY) {
+                stats[0] += txn.getQuantity();
+                stats[1] += txn.getPrice().multiply(java.math.BigDecimal.valueOf(txn.getQuantity())).doubleValue();
+            } else {
+                if (stats[0] > 0) {
+                    double avgBuyPrice = stats[1] / stats[0];
+                    double gain = (txn.getPrice().doubleValue() - avgBuyPrice) * txn.getQuantity();
+                    double gainPercentage = (gain / (avgBuyPrice * txn.getQuantity())) * 100;
+                    
+                    transactionGains.put(txn.getTransactionId(), gain);
+                    transactionGainPercentages.put(txn.getTransactionId(), gainPercentage);
+                    
+                    // Update stats for sell (FIFO/Avg cost)
+                    stats[0] -= txn.getQuantity();
+                    stats[1] -= txn.getQuantity() * avgBuyPrice;
+                }
+            }
+        }
 
         return allTransactions.stream().map(txn -> {
             TransactionDTO dto = new TransactionDTO();
@@ -102,45 +145,31 @@ public class HoldingService {
             dto.setPrice(txn.getPrice());
             dto.setType(txn.getType().name());
             dto.setTransactionDate(txn.getTransactionDate());
+            dto.setPaymentStatus(txn.getPaymentStatus() != null ? txn.getPaymentStatus().name() : "PAID");
+            dto.setNotes(txn.getNotes());
+            dto.setCreatedAt(txn.getCreatedAt());
+            dto.setUpdatedAt(txn.getUpdatedAt());
 
             if (txn.getType() == Transaction.TransactionType.SELL) {
-                double totalBuyQty = 0;
-                double totalBuyCost = 0;
-
-                for (Transaction t : allTransactions) {
-                    if (t.getSymbol().equalsIgnoreCase(txn.getSymbol())
-                            && t.getType() == Transaction.TransactionType.BUY
-                            && t.getTransactionDate().isBefore(txn.getTransactionDate())) {
-                        totalBuyQty += t.getQuantity();
-                        totalBuyCost += t.getQuantity() * t.getPrice();
-                    }
-                }
-
-                if (totalBuyQty > 0) {
-                    double avgBuyPrice = totalBuyCost / totalBuyQty;
-                    double gain = (txn.getPrice() - avgBuyPrice) * txn.getQuantity();
-                    double gainPercentage = (gain / (avgBuyPrice * txn.getQuantity())) * 100;
-
-                    dto.setGain(gain);
-                    dto.setGainPercentage(gainPercentage);
-
-                    if (gain < 0) {
-                        dto.setLoss(-gain);
-                        dto.setLossPercentage(-gainPercentage);
-                    } else {
-                        dto.setLoss(0.0);
-                        dto.setLossPercentage(0.0);
-                    }
-                }
+                Double gain = transactionGains.getOrDefault(txn.getTransactionId(), 0.0);
+                Double gainPct = transactionGainPercentages.getOrDefault(txn.getTransactionId(), 0.0);
+                
+                dto.setGain(java.math.BigDecimal.valueOf(gain));
+                dto.setGainPercentage(java.math.BigDecimal.valueOf(gainPct));
+                dto.setLoss(java.math.BigDecimal.valueOf(gain < 0 ? -gain : 0.0));
+                dto.setLossPercentage(java.math.BigDecimal.valueOf(gain < 0 ? -gainPct : 0.0));
             }
             return dto;
         }).collect(Collectors.toList());
     }
 
     @Transactional
-    public void deleteHolding(Long id) {
+    public void deleteHolding(Long id, Long userId) {
         Holding holding = holdingRepo.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Holding not found with id: " + id));
+        if (!holding.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("Unauthorized to delete this holding.");
+        }
         holdingRepo.delete(holding);
     }
 }

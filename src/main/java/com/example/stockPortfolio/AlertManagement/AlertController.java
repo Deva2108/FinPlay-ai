@@ -1,58 +1,53 @@
 package com.example.stockPortfolio.AlertManagement;
 
-import com.example.stockPortfolio.UserManagement.UserModel;
+import com.example.stockPortfolio.HoldingsManagement.ApiResponse;
+import com.example.stockPortfolio.UserManagement.User;
 import com.example.stockPortfolio.UserManagement.UserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 
 @RestController
-@RequestMapping("/alerts")
-@Tag(name="4. Alert", description = "4th Controller, Alerts")
+@RequestMapping("/api/alerts")
+@Tag(name="4. Alert", description = "Alert Management Controller")
 @Slf4j
+@lombok.RequiredArgsConstructor
 public class AlertController {
 
-    @Autowired
-    public AlertService alertService;
-
-    @Autowired
-    private AlertRepo alertRepo;
-
-    @Autowired
-    private AlertHistoryRepo historyRepo;
-
-    @Autowired
-    private UserService userService;
+    private final AlertService alertService;
+    private final UserService userService;
 
     private Long getLoggedInUserId() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        UserModel user = userService.getUserByEmail(email);
+        User user = userService.getUserByEmail(email);
         return user.getUserId();
     }
 
     @GetMapping
-    public ResponseEntity<List<Alert>> getAlerts(){
-        return ResponseEntity.ok(alertRepo.findByUserId(getLoggedInUserId()));
+    public ResponseEntity<ApiResponse<List<AlertDataDTO>>> getAlerts(){
+        List<AlertDataDTO> alerts = alertService.getAlertsByUserId(getLoggedInUserId());
+        return ResponseEntity.ok(ApiResponse.ok(alerts, "Alerts fetched successfully"));
     }
 
     @GetMapping("/history")
-    public ResponseEntity<List<AlertHistory>> getAlertHistory() {
-        return ResponseEntity.ok(historyRepo.findByUserIdOrderByTriggeredAtDesc(getLoggedInUserId()));
+    public ResponseEntity<ApiResponse<List<AlertHistoryResponseDTO>>> getAlertHistory() {
+        List<AlertHistoryResponseDTO> history = alertService.getAlertHistoryByUserId(getLoggedInUserId()).stream()
+                .map(AlertHistoryResponseDTO::fromEntity)
+                .collect(java.util.stream.Collectors.toList());
+        return ResponseEntity.ok(ApiResponse.ok(history, "Alert history fetched successfully"));
     }
 
     @PostMapping
-    public ResponseEntity<AlertDTO> addAlert(@Valid @RequestBody Alert alert){
+    public ResponseEntity<ApiResponse<AlertDTO>> addAlert(@Valid @RequestBody AlertRequestDTO dto){
         Long userId = getLoggedInUserId();
-        log.info("Creating alert for user {} symbol {}", userId, alert.getSymbol());
-        alert.setUserId(userId);
-        AlertDTO alertDTO = alertService.addAlert(alert);
-        return new ResponseEntity<>(alertDTO, HttpStatus.valueOf(alertDTO.getStatus()));
+        log.info("Creating alert for user {} symbol {}", userId, dto.getSymbol());
+        AlertDTO alertDTO = alertService.addAlert(dto, userId);
+        return ResponseEntity.status(HttpStatus.valueOf(alertDTO.getStatus()))
+                .body(ApiResponse.ok(alertDTO, "Alert created successfully"));
     }
 }

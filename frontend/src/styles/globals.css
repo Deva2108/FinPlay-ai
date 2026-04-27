@@ -16,17 +16,33 @@ body {
 
 @layer components {
   .glass-card {
-    @apply bg-white/[0.03] backdrop-blur-md border border-white/[0.08] rounded-2xl shadow-2xl transition-all duration-300;
+    @apply bg-white/[0.05] backdrop-blur-sm border border-white/[0.12] rounded-[2rem] shadow-2xl transition-all duration-500;
   }
   .glow-border-blue {
-    @apply border-blue-500/30 hover:border-blue-500/60 shadow-[0_0_15px_rgba(59,130,246,0.1)];
+    @apply border-blue-500/40 hover:border-blue-500/70 shadow-[0_0_20px_rgba(59,130,246,0.15)];
   }
   .glow-border-green {
-    @apply border-emerald-500/30 hover:border-emerald-500/60 shadow-[0_0_15px_rgba(16,185,129,0.1)];
+    @apply border-emerald-500/40 hover:border-emerald-500/70 shadow-[0_0_20px_rgba(16,185,129,0.15)];
   }
   .card-hover {
-    @apply hover:bg-white/[0.06] hover:scale-[1.02] active:scale-[0.98];
+    @apply hover:bg-white/[0.08] hover:scale-[1.01] active:scale-[0.99];
   }
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .no-scrollbar::-webkit-scrollbar {

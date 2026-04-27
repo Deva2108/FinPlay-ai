@@ -1,6 +1,5 @@
 package com.example.stockPortfolio.MarketManagement;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -8,10 +7,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
+@lombok.RequiredArgsConstructor
 public class MarketAnalysisService {
 
-    @Autowired
-    private FinnhubService finnhubService;
+    private final FinnhubService finnhubService;
 
     private final Map<String, Map<String, Object>> cache = new ConcurrentHashMap<>();
     private long lastCacheTime = 0;
@@ -49,15 +48,17 @@ public class MarketAnalysisService {
     public synchronized List<Map<String, Object>> getMarketData() {
         long now = System.currentTimeMillis();
         if (now - lastCacheTime > CACHE_DURATION_MS || cache.isEmpty()) {
-            UNIVERSE.parallelStream().forEach(u -> {
+            UNIVERSE.stream().forEach(u -> {
                 try {
                     Map<String, Object> quote = finnhubService.getStockQuote(u.get("symbol"));
-                    Map<String, Object> enriched = new HashMap<>(quote);
-                    enriched.put("sector", u.get("sector"));
-                    enriched.put("marketCap", u.get("marketCap"));
-                    cache.put(u.get("symbol"), enriched);
+                    if (quote != null) {
+                        Map<String, Object> enriched = new HashMap<>(quote);
+                        enriched.put("sector", u.get("sector"));
+                        enriched.put("marketCap", u.get("marketCap"));
+                        cache.put(u.get("symbol"), enriched);
+                    }
                 } catch (Exception e) {
-                    // Skip on error
+                    // Fail silently for individual stocks to keep the list populated
                 }
             });
             lastCacheTime = now;
@@ -69,8 +70,8 @@ public class MarketAnalysisService {
         return getMarketData().stream()
                 .filter(m -> filterByCap(m, capFilter) && filterBySector(m, sectorFilter))
                 .sorted((a, b) -> Double.compare(
-                        (Double) b.getOrDefault("changesPercentage", 0.0),
-                        (Double) a.getOrDefault("changesPercentage", 0.0)))
+                        getDouble(b, "changesPercentage"),
+                        getDouble(a, "changesPercentage")))
                 .collect(Collectors.toList());
     }
 
@@ -78,8 +79,8 @@ public class MarketAnalysisService {
         return getMarketData().stream()
                 .filter(m -> filterByCap(m, capFilter) && filterBySector(m, sectorFilter))
                 .sorted((a, b) -> Double.compare(
-                        (Double) a.getOrDefault("changesPercentage", 0.0),
-                        (Double) b.getOrDefault("changesPercentage", 0.0)))
+                        getDouble(a, "changesPercentage"),
+                        getDouble(b, "changesPercentage")))
                 .collect(Collectors.toList());
     }
 
@@ -87,18 +88,28 @@ public class MarketAnalysisService {
         return getMarketData().stream()
                 .filter(m -> filterBySector(m, sector))
                 .sorted((a, b) -> Double.compare(
-                        (Double) b.getOrDefault("changesPercentage", 0.0),
-                        (Double) a.getOrDefault("changesPercentage", 0.0)))
+                        getDouble(b, "changesPercentage"),
+                        getDouble(a, "changesPercentage")))
                 .collect(Collectors.toList());
     }
 
     public List<Map<String, Object>> getTrending() {
-        return getMarketData().stream()
-                .sorted((a, b) -> Double.compare(
-                        Math.abs((Double) b.getOrDefault("changesPercentage", 0.0)),
-                        Math.abs((Double) a.getOrDefault("changesPercentage", 0.0))))
-                .limit(5)
-                .collect(Collectors.toList());
+        try {
+            return getMarketData().stream()
+                    .sorted((a, b) -> Double.compare(
+                            Math.abs(getDouble(b, "changesPercentage")),
+                            Math.abs(getDouble(a, "changesPercentage"))))
+                    .limit(5)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+    }
+
+    private double getDouble(Map<String, Object> map, String key) {
+        Object val = map.get(key);
+        if (val instanceof Number) return ((Number) val).doubleValue();
+        return 0.0;
     }
 
     private boolean filterByCap(Map<String, Object> stock, String capFilter) {
@@ -119,5 +130,53 @@ public class MarketAnalysisService {
         if (stockSector == null) return false;
         
         return stockSector.equalsIgnoreCase(sectorFilter);
+    }
+
+    public List<Map<String, String>> getFamousInsights(String symbol) {
+        List<Map<String, String>> allInsights = new ArrayList<>();
+        
+        allInsights.add(Map.of(
+            "investor", "Warren Buffett",
+            "stock", "AAPL",
+            "title", "The Power of Moat",
+            "podcastUrl", "https://www.youtube.com/watch?v=2a9Lx9J8uEs",
+            "message", "I don't look to jump over 7-foot bars: I look around for 1-foot bars that I can step over."
+        ));
+        
+        allInsights.add(Map.of(
+            "investor", "Rakesh Jhunjhunwala",
+            "stock", "TATA MOTORS",
+            "title", "India's Structural Bull Run",
+            "podcastUrl", "https://www.youtube.com/watch?v=0A6vW0V0-pU",
+            "message", "Respect the market. Have an open mind. Know what to stake and when to take a loss."
+        ));
+
+        allInsights.add(Map.of(
+            "investor", "Cathie Wood",
+            "stock", "TSLA",
+            "title", "Disruptive Innovation",
+            "podcastUrl", "https://www.youtube.com/watch?v=mY9uI2O_fX8",
+            "message", "Innovation is the key to growth. We focus on the next big technology shifts."
+        ));
+
+        allInsights.add(Map.of(
+            "investor", "Naval Ravikant",
+            "stock", "ALL",
+            "title", "How to Get Rich",
+            "podcastUrl", "https://www.youtube.com/watch?v=1-TZqOsVCNM",
+            "message", "Productize yourself. Wealth is assets that earn while you sleep."
+        ));
+
+        if (symbol == null || symbol.equalsIgnoreCase("all")) {
+            return allInsights;
+        }
+
+        try {
+            return allInsights.stream()
+                    .filter(i -> i.get("stock").equalsIgnoreCase(symbol) || i.get("stock").equalsIgnoreCase("ALL"))
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
     }
 }

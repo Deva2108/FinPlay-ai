@@ -1,29 +1,48 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Info, TrendingUp, TrendingDown, Lightbulb, Target, Activity, Briefcase, Zap } from 'lucide-react';
+import { X, Info, TrendingUp, TrendingDown, Lightbulb, Target, Activity, Briefcase, Zap, Loader2 } from 'lucide-react';
 import MiniChart from './MiniChart';
 import InfoTooltip from './InfoTooltip';
+import { getIndexInsight } from '../services/api';
+import { useMarket } from '../context/MarketContext';
 
 export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGame }) {
+  const { marketMode } = useMarket();
   const [timeframe, setTimeframe] = useState('1D');
   const [userDecision, setUserDecision] = useState(null);
+  const [aiInsight, setAiInsight] = useState(null);
+  const [loadingInsight, setLoadingInsight] = useState(false);
 
   // Prevent body scroll when open
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
       setUserDecision(null); // Reset choice on open
+      fetchAiInsight();
     } else {
       document.body.style.overflow = 'auto';
     }
     return () => {
       document.body.style.overflow = 'auto';
     };
-  }, [isOpen]);
+  }, [isOpen, indexData]);
+
+  const fetchAiInsight = async () => {
+    if (!indexData) return;
+    setLoadingInsight(true);
+    try {
+      const res = await getIndexInsight(indexData.symbol, indexData.value, indexData.change, marketMode);
+      setAiInsight(res);
+    } catch (err) {
+      console.error("AI Insight Error", err);
+    } finally {
+      setLoadingInsight(false);
+    }
+  };
 
   if (!indexData) return null;
 
-  const isPositive = (indexData.change || "").startsWith('+');
+  const isPositive = (indexData.change || "").startsWith('+') || (indexData.changesPercentage >= 0);
   const accentColor = isPositive ? 'text-emerald-400' : 'text-rose-400';
 
   return (
@@ -59,7 +78,7 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
                 <div className="flex items-center gap-3">
                   <span className="text-xl font-bold text-slate-200">{indexData.value}</span>
                   <span className={`text-sm font-black ${accentColor}`}>
-                    {indexData.change} ({indexData.percent})
+                    {indexData.change} ({indexData.percent || indexData.changesPercentage + '%'})
                   </span>
                 </div>
               </div>
@@ -78,7 +97,7 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
               <section className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                    <Activity size={12} /> <InfoTooltip concept="volatility">Live Trend</InfoTooltip>
+                    <Activity size={12} /> <InfoTooltip concept="volatility">Live Market Momentum</InfoTooltip>
                   </h4>
                   <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/5">
                     {['1D', '1W', '1M'].map((tf) => (
@@ -86,7 +105,7 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
                         key={tf}
                         onClick={() => setTimeframe(tf)}
                         className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all ${
-                          timeframe === tf ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'
+                          timeframe === tf ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-slate-500 hover:text-slate-300'
                         }`}
                       >
                         {tf}
@@ -94,111 +113,96 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
                     ))}
                   </div>
                 </div>
-                <div className="bg-slate-950/50 rounded-3xl border border-white/5 p-4 relative overflow-hidden">
+                <div className="bg-slate-950/50 rounded-3xl border border-white/5 p-4 relative overflow-hidden group/chart">
+                   <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover/chart:opacity-100 transition-opacity pointer-events-none" />
                    <MiniChart timeframe={timeframe} color={isPositive ? '#10b981' : '#f43f5e'} />
                 </div>
               </section>
 
-              {/* ✅ STEP 3: IMPACT PREVIEW */}
-              <section className="px-4 py-2 border border-white/5 rounded-2xl bg-white/[0.02]">
-                <p className="text-sm font-bold text-slate-400 opacity-70">
-                  If you invested yesterday: <span className={accentColor}>+0.56% today</span>
-                </p>
+              {/* Performance Summary */}
+              <section className="px-6 py-4 border border-blue-500/10 rounded-2xl bg-blue-500/5 flex items-center justify-between">
+                <p className="text-xs font-black text-blue-400 uppercase tracking-widest">Global impact</p>
+                <span className={`text-sm font-black ${accentColor}`}>
+                  {isPositive ? 'Accumulation' : 'Distribution'} Phase
+                </span>
               </section>
 
               {/* Learning Block */}
               <section className="space-y-3">
                 <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                  <Info size={12} /> Insight
+                  <Info size={12} /> Educational Context
                 </h4>
-                <div className="p-5 rounded-3xl bg-white/5 border border-white/5 space-y-3">
-                  <p className="text-sm text-slate-300 font-medium leading-relaxed">
-                    This index tracks the performance of key companies. A rising trend indicates bullish market sentiment and sector strength.
-                  </p>
-                  <div className="text-[11px] font-bold p-3 rounded-xl bg-blue-500/10 text-blue-400 flex items-center gap-2">
-                    <Lightbulb size={14} />
-                    {isPositive ? "Positive momentum detected." : "Current trend shows a short-term cooling period."}
-                  </div>
+                <div className="p-6 rounded-[2rem] bg-white/5 border border-white/5 space-y-4">
+                  {loadingInsight ? (
+                    <div className="flex flex-col items-center gap-3 py-4">
+                      <Loader2 size={20} className="animate-spin text-blue-500" />
+                      <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest animate-pulse">Syncing Macro Intelligence...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm text-slate-300 font-medium leading-relaxed italic">
+                        "{aiInsight?.explanation || "This index represents the pulse of the major sectors. When it moves, the entire market shifts its stance."}"
+                      </p>
+                      <div className="text-[11px] font-bold p-4 rounded-2xl bg-blue-500/10 text-blue-400 flex items-start gap-3 border border-blue-500/20">
+                        <Lightbulb size={16} className="shrink-0 mt-0.5" />
+                        <p>{aiInsight?.observation || (isPositive ? "Current strength suggests high institutional confidence. Small pullbacks could be healthy." : "Heightened volatility observed. This is where disciplined traders separate from the impulsive.")}</p>
+                      </div>
+                    </>
+                  )}
                 </div>
               </section>
 
-              {/* ✅ STEP 4: PERSONAL CONTEXT */}
-              <section className="p-4 rounded-2xl bg-white/5 border border-white/5 flex items-start gap-3">
-                 <div className="p-2 bg-blue-500/10 rounded-lg shrink-0 text-blue-400">
-                    <Activity size={14} />
-                 </div>
-                 <div className="space-y-1">
-                    <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Your Context</h5>
-                    <p className="text-xs font-bold text-slate-300 leading-relaxed">
-                      You are currently focused on 1 sector. This trend may increase your risk.
-                    </p>
-                 </div>
-              </section>
-
-              {/* ✅ STEP 2: WHAT WOULD YOU DO? BLOCK */}
-              <section className="space-y-4 pt-4 border-t border-white/5">
-                <div className="flex items-center gap-2">
-                  <Target size={14} className="text-blue-500" />
-                  <h4 className="text-[10px] font-black text-white uppercase tracking-widest">If this trend continues, what would you do?</h4>
+              {/* User Behavioral Check */}
+              <section className="space-y-4 pt-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-600/10 rounded-lg text-purple-400">
+                    <Target size={14} />
+                  </div>
+                  <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Self-Check: What's your move?</h4>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
-                   {['Buy Leaders', 'Wait', 'Avoid Market'].map((option) => (
+                   {[
+                     { label: 'Strike with Momentum', value: 'Buy Leaders', icon: <Zap size={12}/> },
+                     { label: 'Wait for Confirmation', value: 'Wait', icon: <Activity size={12}/> },
+                     { label: 'Defensive Stance', value: 'Avoid Market', icon: <Shield size={12}/> }
+                   ].map((opt) => (
                      <button 
-                       key={option}
-                       onClick={() => setUserDecision(option)}
-                       className={`py-3 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${
-                         userDecision === option 
-                          ? 'bg-blue-600 border-blue-500 text-white' 
+                       key={opt.value}
+                       onClick={() => setUserDecision(opt.value)}
+                       className={`py-4 px-5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-between border ${
+                         userDecision === opt.value 
+                          ? 'bg-blue-600 border-blue-500 text-white shadow-xl scale-[1.02]' 
                           : 'bg-white/5 border-white/5 text-slate-400 hover:bg-white/10'
                        }`}
                      >
-                       {option}
+                       <span className="flex items-center gap-2">{opt.icon} {opt.label}</span>
+                       {userDecision === opt.value && <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />}
                      </button>
                    ))}
                 </div>
               </section>
 
-              {/* Smart Insight */}
-              <section className="space-y-3">
-                <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2">
-                  <Zap size={12} /> Smart Insight
-                </h4>
-                <div className="p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/10 flex items-start gap-3">
-                   <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0 text-emerald-400">
-                      <Zap size={14} />
-                   </div>
-                   <p className="text-[11px] font-bold text-slate-300 leading-relaxed">
-                     Broad market sentiment is 72% Bullish. Large-cap stocks are leading the rally with strong volume support.
-                   </p>
-                </div>
-              </section>
-
             </div>
 
-            {/* ✅ STEP 1: ACTION FOOTER */}
-            <div className="p-6 bg-slate-900 border-t border-white/5 flex flex-wrap gap-2 z-20 sticky bottom-0">
+            {/* Action Footer */}
+            <div className="p-6 bg-slate-900 border-t border-white/5 flex flex-col gap-3 z-20 sticky bottom-0 backdrop-blur-xl">
                <button 
                  onClick={() => {
-                   console.log("TRY_GAME_TRIGGERED", indexData?.symbol);
-                   onTryGame?.(indexData?.symbol);
+                   onTryGame?.(indexData);
                    onClose();
                  }}
-                 className="flex-1 min-w-[120px] py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
+                 className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black uppercase tracking-[0.2em] transition-all shadow-2xl shadow-blue-600/20 flex items-center justify-center gap-3 group"
                >
-                 <Zap size={14} /> Try in Game
+                 <Zap size={16} className="group-hover:scale-125 transition-transform" /> Enter Decision Arena
                </button>
-               <button 
-                 onClick={() => console.log("action")}
-                 className="flex-1 min-w-[120px] py-3 px-4 rounded-xl bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
-               >
-                 <Briefcase size={14} /> Add to Watchlist
-               </button>
-               <button 
-                 onClick={() => console.log("action")}
-                 className="w-full py-3 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest border border-white/5 transition-all"
-               >
-                 Explore Stocks
-               </button>
+               <div className="grid grid-cols-2 gap-2">
+                  <button className="py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white text-[9px] font-black uppercase tracking-widest border border-white/5 transition-all">
+                    Track Sector
+                  </button>
+                  <button className="py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white text-[9px] font-black uppercase tracking-widest border border-white/5 transition-all">
+                    View Holdings
+                  </button>
+               </div>
             </div>
 
           </motion.div>

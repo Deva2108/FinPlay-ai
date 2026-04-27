@@ -2,11 +2,64 @@ import axios from 'axios';
 
 // Backend Base URL from env or fallback
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
-console.log("API URL FIXED:", API_BASE_URL);
+
+if (!import.meta.env.VITE_API_URL) {
+  console.warn("VITE_API_URL is not defined. Falling back to http://localhost:8080");
+}
+
+export const API_ENDPOINTS = {
+  AUTH: {
+    LOGIN: '/api/auth/login',
+    REGISTER: '/api/auth/register',
+  },
+  USER: {
+    PROFILE: (email) => `/api/user/profile/${email}`,
+  },
+  PORTFOLIO: {
+    BASE: '/api/portfolios',
+    BALANCE: (id) => `/api/portfolios/${id}/balance`,
+    MENTOR: (id) => `/api/portfolios/${id}/mentor`,
+  },
+  HOLDINGS: {
+    BASE: '/api/holdings',
+    TRANSACTIONS: '/api/holdings/transactions',
+    DELETE: (id) => `/api/holdings/${id}`,
+  },
+  MARKET: {
+    QUOTES: '/api/market/quotes',
+    QUOTE: '/api/market/quote',
+    NEWS: '/api/market/news',
+    DETAILS: '/api/market/details',
+    SEARCH: '/api/market/search',
+    CHART: '/api/market/chart',
+    INDICES: '/api/market/indices',
+    INDEX_INSIGHT: '/api/market/index-insight',
+    VIBE: '/api/market/vibe',
+    PULSE: '/api/market/pulse',
+    FAMOUS: '/api/market/insights/famous',
+  },
+  DECISION: {
+    BASE: '/api/decision',
+    EVALUATE: '/api/decision/evaluate',
+    STATS: '/api/decision/stats',
+    INSIGHTS: '/api/decision/insights',
+    ARCHETYPE: '/api/decision/archetype',
+  },
+  AI: {
+    ONBOARDING: {
+      SCENARIO: '/api/ai/onboarding/scenario',
+      SCENARIOS: '/api/ai/onboarding/scenarios',
+      FEEDBACK: '/api/ai/onboarding/feedback',
+      SUMMARY: '/api/ai/onboarding/summary',
+    },
+    EXPLAIN: '/api/explain',
+    TUTORIAL: '/api/tutorial/insight',
+  }
+};
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 5000,
+  timeout: 15000,
 });
 
 // Interceptor for JWT
@@ -25,7 +78,6 @@ api.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/register';
       if (!isAuthPage) {
-        console.log("JWT EXPIRED OR INVALID -> AUTO LOGOUT");
         localStorage.removeItem('token');
         window.location.href = '/login';
       }
@@ -34,287 +86,217 @@ api.interceptors.response.use(
   }
 );
 
-// Auth APIs (Using Configured Instance)
-export const registerUser = async (data) => {
-  try {
-    const res = await axios.post(`${API_BASE_URL}/user/register`, data);
-    console.log("REGISTER SUCCESS:", res.data);
-    return res.data;
-  } catch (err) {
-    console.log("REGISTER ERROR FULL:", err);
-    console.log("REGISTER ERROR RESPONSE:", err.response);
-    console.log("REGISTER ERROR DATA:", err.response?.data);
-    throw err;
+/**
+ * Standard unwrap for the new ApiResponse structure:
+ * { success: true, data: T, message: "" }
+ */
+const unwrap = (response) => {
+  if (!response || !response.data) return null;
+  // If backend returns the standardized ApiResponse
+  if (response.data.success !== undefined) {
+    return response.data.data;
   }
+  // Fallback for non-standardized or error responses
+  return response.data;
+};
+
+// Auth APIs
+export const registerUser = async (data) => {
+  const response = await api.post(API_ENDPOINTS.AUTH.REGISTER, data);
+  return unwrap(response);
 };
 
 export const loginUser = async (data) => {
-  try {
-    // Cleanup old token
-    localStorage.removeItem('token');
-    
-    const response = await api.post('/user/login', data);
-    const result = response.data.result || response.data;
-    const token = typeof result === 'string' ? result : result?.token;
-    
-    if (token) {
-      localStorage.setItem('token', token);
-    }
-    return response.data;
-  } catch (error) {
-    console.error("Login failed:", error);
-    throw error.response?.data?.message || error.message || "Login failed";
+  localStorage.removeItem('token');
+  const response = await api.post(API_ENDPOINTS.AUTH.LOGIN, data);
+  const result = unwrap(response);
+  const token = result?.token; 
+  if (token) {
+    localStorage.setItem('token', token);
   }
+  return result;
 };
 
 export const logoutUser = () => {
   localStorage.removeItem('token');
 };
 
-// Trading APIs
-export const getUserPortfolios = async () => {
-  try {
-    const response = await api.get('/portfolios');
-    return response.data.result || response.data;
-  } catch (error) {
-    throw error.response?.data?.message || error;
-  }
+// User APIs
+export const updateProfile = async (email, data) => {
+  const response = await api.put(API_ENDPOINTS.USER.PROFILE(email), data);
+  return unwrap(response);
+};
+
+// Trading & Portfolio APIs
+export const getPortfolio = async () => {
+  const response = await api.get(API_ENDPOINTS.PORTFOLIO.BASE);
+  return unwrap(response);
+};
+
+export const getUserPortfolios = getPortfolio;
+
+export const getPortfolioMentorAdvice = async (portfolioId) => {
+  const response = await api.get(API_ENDPOINTS.PORTFOLIO.MENTOR(portfolioId));
+  return unwrap(response);
 };
 
 export const createPortfolio = async (name) => {
-  try {
-    const response = await api.post('/portfolios', { name });
-    return response.data.result || response.data;
-  } catch (error) {
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.post(API_ENDPOINTS.PORTFOLIO.BASE, { portfolioName: name });
+  return unwrap(response);
 };
 
 export const updatePortfolioBalance = async (portfolioId, amount) => {
-  try {
-    const response = await api.post(`/portfolios/${portfolioId}/balance`, { amount });
-    return response.data;
-  } catch (error) {
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.post(API_ENDPOINTS.PORTFOLIO.BALANCE(portfolioId), { amount });
+  return unwrap(response);
+};
+
+// Holdings APIs
+export const getHoldings = async (portfolioId) => {
+  const response = await api.get(API_ENDPOINTS.HOLDINGS.BASE, { params: { portfolioId } });
+  return unwrap(response);
 };
 
 export const executeTrade = async (tradeData) => {
-  try {
-    const portfolios = await getUserPortfolios();
-    const portfolioList = Array.isArray(portfolios) ? portfolios : (portfolios?.result || []);
-    
-    if (portfolioList.length === 0) {
-      throw new Error('No portfolio found for user.');
-    }
-    
-    const portfolioId = portfolioList[0].portfolioId;
-    const payload = {
-      ...tradeData,
-      portfolioId
-    };
-    
-    const response = await api.post('/api/holdings', payload);
-    return response.data.result || response.data;
-  } catch (error) {
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.post(API_ENDPOINTS.HOLDINGS.BASE, tradeData);
+  return unwrap(response);
 };
 
-export const getHoldings = async (portfolioId) => {
-  try {
-    const response = await api.get('/api/holdings', { params: { portfolioId } });
-    return response.data.result || response.data;
-  } catch (error) {
-    throw error.response?.data?.message || error;
-  }
+export const getTransactions = async (portfolioId) => {
+  const response = await api.get(API_ENDPOINTS.HOLDINGS.TRANSACTIONS, { params: { portfolioId } });
+  return unwrap(response);
 };
 
-// Live Market Data fetchers (STRICT ERROR PROPAGATION)
+// Market Data APIs
 export const getLiveQuotes = async (symbols) => {
-  if (!symbols || symbols.length === 0) return [];
-  try {
-    const response = await api.get('/api/market/quotes', {
-      params: { symbols: symbols.join(',') }
-    });
-    return response.data.result || response.data;
-  } catch (error) {
-    console.error('getLiveQuotes failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  if (!Array.isArray(symbols) || symbols.length === 0) return [];
+  const response = await api.get(API_ENDPOINTS.MARKET.QUOTES, { params: { symbols: symbols.join(',') } });
+  return unwrap(response) || [];
 };
 
 export const getQuotes = (symbols) => getLiveQuotes(symbols);
 
 export const getNews = async (query = 'stock market') => {
-  const finalQuery = typeof query === 'number' ? 'stock market' : query;
-  try {
-    const response = await api.get('/api/market/news', {
-      params: { query: finalQuery }
-    });
-    return response.data.result || response.data;
-  } catch (error) {
-    console.error('getNews failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.MARKET.NEWS, { params: { query } });
+  return unwrap(response) || [];
 };
 
 export const getStockDetails = async (symbol) => {
-  try {
-    const response = await api.get('/api/market/details', {
-      params: { symbol }
-    });
-    return response.data.result || response.data;
-  } catch (error) {
-    console.error('getStockDetails failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.MARKET.DETAILS, { params: { symbol } });
+  return unwrap(response);
 };
 
 export const getChartData = async (symbol) => {
-  try {
-    const response = await api.get('/api/market/chart', {
-      params: { symbol }
-    });
-    return response.data.result || response.data;
-  } catch (error) {
-    console.error('getChartData failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.MARKET.CHART, { params: { symbol } });
+  return unwrap(response) || [];
 };
 
-export const getIndices = async () => {
-  try {
-    const response = await api.get('/api/market/indices');
-    return response.data.result || response.data;
-  } catch (error) {
-    console.error('getIndices failed:', error);
-    throw error.response?.data?.message || error;
-  }
+export const getIndices = async (marketType = 'US') => {
+  const response = await api.get(API_ENDPOINTS.MARKET.INDICES, { params: { marketType } });
+  return unwrap(response) || [];
+};
+
+export const getIndexInsight = async (symbol, value, change, marketType) => {
+  const response = await api.get(API_ENDPOINTS.MARKET.INDEX_INSIGHT, { params: { symbol, value, change, marketType } });
+  return unwrap(response);
+};
+
+export const getMarketVibe = async (marketType) => {
+  const response = await api.get(API_ENDPOINTS.MARKET.VIBE, { params: { marketType } });
+  return unwrap(response);
+};
+
+export const getMarketPulse = async (portfolioId) => {
+  const response = await api.get(API_ENDPOINTS.MARKET.PULSE, { params: { portfolioId } });
+  return unwrap(response);
+};
+
+export const getFamousInsights = async (symbol) => {
+  const response = await api.get(API_ENDPOINTS.MARKET.FAMOUS, { params: { symbol } });
+  return unwrap(response) || [];
 };
 
 export const searchStocks = async (q, signal) => {
-  try {
-    const response = await api.get('/api/market/search', { 
-      params: { q },
-      signal 
-    });
-    return response.data.result || response.data;
-  } catch (error) {
-    if (axios.isCancel(error)) {
-      throw { name: 'AbortError' };
-    }
-    console.error('searchStocks failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.MARKET.SEARCH, { params: { q }, signal });
+  return unwrap(response) || [];
 };
 
 export const getGainers = async (cap, sector) => {
-  try {
-    const response = await api.get('/api/market/gainers', { params: { cap, sector } });
-    return response.data.result || response.data;
-  } catch (error) {
-    console.error('getGainers failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.MARKET.GAINERS, { params: { cap, sector } });
+  return unwrap(response) || [];
 };
 
 export const getLosers = async (cap, sector) => {
-  try {
-    const response = await api.get('/api/market/losers', { params: { cap, sector } });
-    return response.data.result || response.data;
-  } catch (error) {
-    console.error('getLosers failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.MARKET.LOSERS, { params: { cap, sector } });
+  return unwrap(response) || [];
 };
 
 export const getTrending = async () => {
-  try {
-    const response = await api.get('/api/market/trending');
-    return response.data.result || response.data;
-  } catch (error) {
-    console.error('getTrending failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.MARKET.TRENDING);
+  return unwrap(response) || [];
 };
 
 export const getBySector = async (name) => {
-  try {
-    const response = await api.get('/api/market/sector', { params: { name } });
-    return response.data.result || response.data;
-  } catch (error) {
-    console.error('getBySector failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.MARKET.SECTOR, { params: { name } });
+  return unwrap(response) || [];
 };
 
+// Insight & AI APIs
 export const trackDecision = async (decisionData) => {
-  try {
-    const response = await api.post('/api/decision', decisionData);
-    return response.data;
-  } catch (error) {
-    console.error('trackDecision failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.post(API_ENDPOINTS.DECISION.BASE, decisionData);
+  return unwrap(response);
 };
 
 export const explainStock = async (stockData) => {
-  try {
-    const response = await api.post('/api/explain', stockData);
-    return response.data;
-  } catch (error) {
-    console.error('explainStock failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.post(API_ENDPOINTS.AI.EXPLAIN, stockData);
+  return unwrap(response);
 };
 
 export const getDecisionStats = async () => {
-  try {
-    const response = await api.get('/api/decision/stats');
-    return response.data;
-  } catch (error) {
-    console.error('getDecisionStats failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.DECISION.STATS);
+  return unwrap(response);
 };
 
 export const getUserInsights = async () => {
-  try {
-    const response = await api.get('/api/decision/insights');
-    return response.data;
-  } catch (error) {
-    console.error('getUserInsights failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.get(API_ENDPOINTS.DECISION.INSIGHTS);
+  return unwrap(response);
+};
+
+export const getInsights = (symbol) => {
+  // If we have a symbol-specific insight endpoint, use it. Otherwise fallback to user insights.
+  return getUserInsights();
+};
+
+export const getArchetype = async () => {
+  const response = await api.get(API_ENDPOINTS.DECISION.ARCHETYPE);
+  return unwrap(response);
 };
 
 export const evaluateDecision = async (evaluationData) => {
-  try {
-    const response = await api.post('/api/decision/evaluate', evaluationData);
-    return response.data;
-  } catch (error) {
-    console.error('evaluateDecision failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.post(API_ENDPOINTS.DECISION.EVALUATE, evaluationData);
+  return unwrap(response);
 };
 
 export const getOnboardingScenario = async (userType) => {
-  try {
-    const response = await api.post('/api/ai/onboarding/scenario', { userType });
-    return response.data;
-  } catch (error) {
-    console.error('getOnboardingScenario failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.post(API_ENDPOINTS.AI.ONBOARDING.SCENARIO, { userType });
+  return unwrap(response);
+};
+
+export const getArenaScenarios = async (marketType) => {
+  const response = await api.get(API_ENDPOINTS.AI.ONBOARDING.SCENARIOS, { params: { marketType } });
+  return unwrap(response) || [];
 };
 
 export const getOnboardingFeedback = async (choice, userType) => {
-  try {
-    const response = await api.post('/api/ai/onboarding/feedback', { choice, userType });
-    return response.data;
-  } catch (error) {
-    console.error('getOnboardingFeedback failed:', error);
-    throw error.response?.data?.message || error;
-  }
+  const response = await api.post(API_ENDPOINTS.AI.ONBOARDING.FEEDBACK, { choice, userType });
+  return unwrap(response);
+};
+
+export const getArenaSummary = async (decisions) => {
+  const response = await api.post(API_ENDPOINTS.AI.ONBOARDING.SUMMARY, { decisions });
+  return unwrap(response);
+};
+
+export const getTutorialInsight = async (topic, context) => {
+  const response = await api.get(API_ENDPOINTS.AI.TUTORIAL, { params: { topic, context } });
+  return unwrap(response);
 };

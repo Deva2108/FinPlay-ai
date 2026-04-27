@@ -16,20 +16,17 @@ public class CacheConfig {
 
     @Bean
     public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
-        // Extended 10-minute TTL for prices to protect API quota
-        RedisCacheConfiguration priceConfig = RedisCacheConfiguration.defaultCacheConfig()
-                .entryTtl(Duration.ofMinutes(10))
-                .disableCachingNullValues();
-
-        // Extended 10-minute TTL for quotes to outlast the 3m scheduler
-        RedisCacheConfiguration quoteConfig = RedisCacheConfiguration.defaultCacheConfig()
-                .entryTtl(Duration.ofMinutes(10))
+        // 30-minute TTL for production efficiency
+        RedisCacheConfiguration standardConfig = RedisCacheConfiguration.defaultCacheConfig()
+                .entryTtl(Duration.ofMinutes(30))
                 .disableCachingNullValues();
 
         return RedisCacheManager.builder(connectionFactory)
-                .cacheDefaults(priceConfig)
-                .withCacheConfiguration("stockPrices", priceConfig)
-                .withCacheConfiguration("stockQuotes", quoteConfig)
+                .cacheDefaults(standardConfig)
+                .withCacheConfiguration("stockPrices", standardConfig)
+                .withCacheConfiguration("stockQuotes", standardConfig)
+                .withCacheConfiguration("marketNews", standardConfig)
+                .withCacheConfiguration("marketVibe", standardConfig)
                 .build();
     }
 }

@@ -61,6 +61,34 @@ public class GeminiService {
         return getDefaultFallback(symbol, trend, action, behavior);
     }
 
+    public com.example.stockPortfolio.AiManagement.ExplainResponseDTO getStructuredExplanation(com.example.stockPortfolio.AiManagement.ExplainRequestDTO request) {
+        String symbol = request.getSymbol() != null ? request.getSymbol() : "the stock";
+        String trend = request.getTrend() != null ? request.getTrend() : "stable";
+        String action = request.getAction() != null ? request.getAction() : "observing";
+        String lang = request.getLang() != null ? request.getLang() : "en";
+        String behavior = request.getBehavior() != null ? request.getBehavior() : "Balanced";
+        String type = request.getType() != null ? request.getType() : "general";
+        Map<String, Object> metrics = request.getMetrics() != null ? request.getMetrics() : new HashMap<>();
+        
+        String response;
+        if ("graph_point".equals(type)) {
+            double price = Double.valueOf(metrics.getOrDefault("price", 0.0).toString());
+            response = getGraphPointExplanation(symbol, price, trend);
+        } else {
+            response = getMentorExplanation(symbol, trend, action, lang, behavior, metrics);
+        }
+        
+        // Structured splitting for frontend
+        String delimiter = response.contains("Next Step:") ? "Next Step:" : "👀 Watch this:";
+        String[] parts = response.split(delimiter);
+        
+        return com.example.stockPortfolio.AiManagement.ExplainResponseDTO.builder()
+                .explanation(parts[0].trim())
+                .observation(parts.length > 1 ? parts[1].trim() : ("en".equals(lang) ? "Observe how volume reacts to this price level." : "Observe karein ki volume kaise react karta hai."))
+                .symbol(symbol)
+                .build();
+    }
+
     private String getDefaultFallback(String symbol, String trend, String action, String behavior) {
         if ("Aggressive".equalsIgnoreCase(behavior)) {
             return "Taking a position in " + symbol + " while the trend is " + trend + " shows your preference for momentum over safety. You're acting on the current energy rather than waiting for a confirmation. 👀 Watch this: If the buying volume sustains this move or starts to fade.";
@@ -279,5 +307,40 @@ public class GeminiService {
             System.err.println("Gemini Feedback API Error: " + e.getMessage());
         }
         return "Decisions shape your financial future. What would you do differently next time?";
+    }
+
+    public String getPortfolioMentorAdvice(List<Map<String, Object>> holdings, Double balance) {
+        return "Keep diversifying your portfolio and watch your position sizes.";
+    }
+
+    public String getIndexInsight(String indexName, String value, String change, String marketType) {
+        return "The index movement reflects current investor sentiment across major sectors. 👀 Watch this: Banking and Infrastructure sectors.";
+    }
+
+    public String getMarketPulseInsights(List<String> symbols, List<Map<String, Object>> news) {
+        return "Market sentiment is mixed. Keep an eye on incoming macro data.";
+    }
+
+    public String getMarketPulse(String marketType) {
+        return "⚖️ Market is searching for clear direction today.";
+    }
+
+    public String getTutorialInsight(String topic, String userContext) {
+        return "Welcome to FinPlay! Markets move based on supply and demand. You're here to learn the rhythm.";
+    }
+
+    public String getArenaSummary(Object decisions) {
+        return "You have a balanced approach.";
+    }
+
+    public com.example.stockPortfolio.DecisionManagement.ArchetypeResponseDTO getBehavioralIdentity(List<Map<String, Object>> decisions) {
+        return com.example.stockPortfolio.DecisionManagement.ArchetypeResponseDTO.builder()
+                .title("The Strategist")
+                .trait("Calculated moves with a focus on stability.")
+                .build();
+    }
+
+    public List<Map<String, Object>> generateMarketScenarios(String marketType) {
+        return Collections.emptyList();
     }
 }

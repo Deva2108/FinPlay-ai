@@ -1,7 +1,9 @@
 package com.example.stockPortfolio.MarketManagement;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -11,6 +13,7 @@ import java.util.stream.Collectors;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class FinnhubService {
 
     @Value("${finnhub.api.key}")
@@ -19,8 +22,9 @@ public class FinnhubService {
     @Value("${finnhub.base-url}")
     private String baseUrl;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
+    @Cacheable(value = "stockQuotes", key = "#symbol.toUpperCase()", unless = "#result == null")
     public Map<String, Object> getStockQuote(String symbol) {
         try {
             String url = UriComponentsBuilder.fromHttpUrl(baseUrl + "/quote")
@@ -32,7 +36,7 @@ public class FinnhubService {
             if (response != null && response.get("c") != null) {
                 double c = Double.parseDouble(response.get("c").toString());
                 if (c == 0) {
-                    throw new RuntimeException("Finnhub returned 0 price. Invalid symbol or limit reached.");
+                    throw new IllegalArgumentException("Finnhub returned 0 price. Invalid symbol or limit reached.");
                 }
                 
                 Map<String, Object> result = new HashMap<>();
@@ -52,6 +56,7 @@ public class FinnhubService {
         }
     }
 
+    @Cacheable(value = "marketNews", key = "'finnhub:' + #symbol.toUpperCase()", unless = "#result == null || #result.isEmpty()")
     public List<Map<String, Object>> getCompanyNews(String symbol) {
         try {
             // Finnhub expects YYYY-MM-DD for news
@@ -102,21 +107,11 @@ public class FinnhubService {
                 return searchResults.stream()
                         .filter(r -> "Common Stock".equals(r.get("type")))
                         .limit(5)
-                        .parallel() // Fetch quotes in parallel for speed
                         .map(r -> {
                             String symbol = (String) r.get("symbol");
                             Map<String, Object> map = new HashMap<>();
                             map.put("symbol", symbol);
                             map.put("name", r.get("description"));
-                            
-                            try {
-                                // Enrich with real-time price
-                                Map<String, Object> quote = getStockQuote(symbol);
-                                map.put("price", quote.get("price"));
-                                map.put("changesPercentage", quote.get("changesPercentage"));
-                            } catch (Exception e) {
-                                map.put("price", 0.0);
-                            }
                             return map;
                         }).collect(Collectors.toList());
             }

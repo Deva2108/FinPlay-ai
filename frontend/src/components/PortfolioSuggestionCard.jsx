@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Lightbulb, ArrowRight, Compass, ShieldAlert, BarChart3, AlertTriangle } from 'lucide-react';
+import { Lightbulb, ArrowRight, Compass, ShieldAlert, BarChart3, AlertTriangle, Sparkles, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-export default function PortfolioSuggestionCard({ holdings, totalYield }) {
+export default function PortfolioSuggestionCard({ holdings, totalYield, mentorAdvice, loadingMentor }) {
   const navigate = useNavigate();
 
   const suggestion = useMemo(() => {
@@ -15,6 +15,26 @@ export default function PortfolioSuggestionCard({ holdings, totalYield }) {
       risk: "None",
       confidence: "95%"
     };
+
+    if (loadingMentor) return {
+      title: "Analyzing Portfolio...",
+      text: "Our AI Mentor is currently scanning your holdings for deep insights. Please wait...",
+      icon: <Loader2 size={24} className="text-blue-400 animate-spin" />,
+      color: "blue",
+      risk: "Calculating...",
+      confidence: "..."
+    };
+
+    if (mentorAdvice) {
+      return {
+        title: "AI Mentor Insight",
+        text: mentorAdvice,
+        icon: <Sparkles size={24} className="text-blue-400" />,
+        color: "blue",
+        risk: totalYield < -5 ? "High" : totalYield < 0 ? "Medium" : "Low",
+        confidence: "92%"
+      };
+    }
 
     if (holdings.length === 1) return {
       title: "Diversification Risk",

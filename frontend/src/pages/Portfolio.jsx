@@ -5,9 +5,10 @@ import {
   Briefcase, ArrowUpRight, TrendingDown, PieChart as PieIcon, Activity, 
   ArrowRight, DollarSign, Zap, Lightbulb, Trash2, Shield, AlertTriangle, 
   Info, Target, Newspaper, Award, TrendingUp, ChevronRight, CheckCircle2,
-  BrainCircuit, LineChart, HelpCircle
+  BrainCircuit, LineChart, HelpCircle, Sparkles, Loader2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { getUserPortfolios, getPortfolioMentorAdvice, getArchetype } from '../services/api';
 import { formatPrice } from '../utils/formatters';
 import { useTrading } from '../context/TradingContext';
 import { useStockPanel } from '../context/StockPanelContext';
@@ -57,6 +58,52 @@ export default function Portfolio() {
   const [insightContent, setInsightContent] = useState(null);
   const [isStockPanelOpen, setIsStockPanelOpen] = useState(false);
   const [selectedPortfolioStock, setSelectedPortfolioStock] = useState(null);
+
+  const [activePortfolioId, setActivePortfolioId] = useState(null);
+  const [mentorAdvice, setMentorAdvice] = useState('');
+  const [loadingMentor, setLoadingMentor] = useState(false);
+  const [archetype, setArchetype] = useState(null);
+  const [loadingArchetype, setLoadingArchetype] = useState(false);
+
+  useEffect(() => {
+    const fetchArchetype = async () => {
+      setLoadingArchetype(true);
+      try {
+        const res = await getArchetype();
+        setArchetype(res);
+      } catch (err) {}
+      setLoadingArchetype(false);
+    };
+    fetchArchetype();
+  }, []);
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const ports = await getUserPortfolios();
+        const list = Array.isArray(ports) ? ports : (ports?.result || []);
+        if (list.length > 0) setActivePortfolioId(list[0].portfolioId);
+      } catch (err) {}
+    };
+    init();
+  }, []);
+
+  const fetchMentorAdvice = async () => {
+    if (!activePortfolioId) return;
+    setLoadingMentor(true);
+    try {
+      const res = await getPortfolioMentorAdvice(activePortfolioId);
+      setMentorAdvice(res?.advice);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingMentor(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activePortfolioId) fetchMentorAdvice();
+  }, [activePortfolioId]);
 
   const handlePortfolioStockClick = (stock) => {
     setSelectedPortfolioStock(stock);
@@ -272,10 +319,35 @@ export default function Portfolio() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-8 sm:py-12">
         <div className="grid grid-cols-1 lg:grid-cols-10 gap-4 items-start">
-          
+
           {/* LEFT COLUMN: PRIMARY DATA & HOLDINGS */}
-          <div className="lg:col-span-6 flex flex-col gap-4">
-            
+          <div className="lg:col-span-6 flex flex-col gap-6">
+
+            {/* AI Behavioral Identity Card */}
+            <motion.div 
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="p-8 rounded-[2.5rem] bg-slate-900/60 border border-white/5 relative overflow-hidden group"
+            >
+               <div className="absolute inset-0 bg-blue-600/5 blur-3xl rounded-[3rem]" />
+               <div className="relative z-10 flex flex-col md:flex-row items-center gap-8">
+                  <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-3xl font-black text-white shadow-2xl group-hover:rotate-3 transition-transform shrink-0">
+                     {loadingArchetype ? <Loader2 className="animate-spin" size={32} /> : (archetype?.title?.charAt(0) || "U")}
+                  </div>
+                  <div className="text-center md:text-left space-y-2">
+                     <div className="flex items-center justify-center md:justify-start gap-3">
+                        <h1 className="text-2xl font-black text-white tracking-tighter uppercase">
+                          {loadingArchetype ? "Analyzing..." : (archetype?.title || "Evaluating Style")}
+                        </h1>
+                        <div className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/20 rounded-full text-[9px] font-black text-emerald-400 uppercase tracking-widest">Psych Profile</div>
+                     </div>
+                     <p className="text-blue-100/70 font-medium text-sm leading-relaxed">
+                        {loadingArchetype ? "Deep-scanning your recent market decisions..." : (archetype?.trait || "Start making decisions in the Arena to unlock your psychological profile.")}
+                     </p>
+                  </div>
+               </div>
+            </motion.div>
+
             {/* Core Value Card */}
             <div className="bg-slate-900/40 border border-slate-800 p-6 rounded-[2rem] shadow-2xl backdrop-blur-md">
               <div className="space-y-4">
@@ -325,7 +397,12 @@ export default function Portfolio() {
 
             {/* Holdings section */}
             <div className="space-y-4">
-              <PortfolioSuggestionCard holdings={holdings} totalYield={totalYield} />
+              <PortfolioSuggestionCard 
+                holdings={holdings} 
+                totalYield={totalYield} 
+                mentorAdvice={mentorAdvice}
+                loadingMentor={loadingMentor}
+              />
               
               <div className="flex items-center gap-3 px-2">
                 <div className="p-2 bg-blue-600 rounded-xl shadow-lg shadow-blue-600/20"><Activity size={16} className="text-white" /></div>
@@ -333,9 +410,9 @@ export default function Portfolio() {
               </div>
 
               <div className="flex flex-col gap-4">
-                {(holdings || []).map((stock) => (
+                {(Array.isArray(holdings) ? holdings : []).map((stock) => (
                   <motion.div 
-                    key={stock.symbol}
+                    key={stock?.symbol || Math.random()}
                     onClick={() => handlePortfolioStockClick(stock)}
                     whileHover={{ scale: 1.01 }}
                     className="bg-slate-900/40 border border-slate-800 rounded-[2rem] p-6 group cursor-pointer relative overflow-hidden"
@@ -370,6 +447,50 @@ export default function Portfolio() {
           {/* RIGHT COLUMN: ANALYTICS */}
           <div className="lg:col-span-4 flex flex-col gap-4 h-full">
             
+            {/* AI Mentor Advice Card */}
+            <motion.div 
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="p-8 rounded-[2rem] bg-[#020617] border border-blue-500/20 shadow-2xl relative overflow-hidden group"
+            >
+              <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-20 transition-opacity">
+                <BrainCircuit size={80} className="text-blue-400" />
+              </div>
+              
+              <div className="relative z-10 space-y-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-blue-600 rounded-xl text-white shadow-lg shadow-blue-600/20">
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-white uppercase tracking-tighter">AI Mentor Advice</h3>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Deep Portfolio Analysis</p>
+                  </div>
+                </div>
+
+                <div className="bg-white/5 border border-white/5 p-6 rounded-2xl">
+                  {loadingMentor ? (
+                    <div className="flex flex-col items-center gap-3 py-4">
+                      <Loader2 size={24} className="animate-spin text-blue-400" />
+                      <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest animate-pulse text-center">Syncing with Live Intelligence...</span>
+                    </div>
+                  ) : (
+                    <p className="text-sm font-bold leading-relaxed text-blue-100/90 italic">
+                      "{mentorAdvice || "Your portfolio is ready for analysis. Keep making trades to build a behavioral profile."}"
+                    </p>
+                  )}
+                </div>
+
+                <button 
+                  onClick={fetchMentorAdvice}
+                  disabled={loadingMentor}
+                  className="flex items-center gap-2 text-[10px] font-black text-blue-400 uppercase tracking-widest hover:text-blue-300 transition-colors group/btn"
+                >
+                  Regenerate Analysis <ArrowRight size={12} className="group-hover/btn:translate-x-1 transition-transform" />
+                </button>
+              </div>
+            </motion.div>
+
             {/* Adaptive Learning Insight */}
             <MicroLearningCard insight={adaptiveInsight} />
 

@@ -19,7 +19,7 @@ public class Alert {
     @NotBlank(message = "Symbol should not be blank!")
     private String symbol;
     
-    private Double targetPrice; // Changed from String to Double for consistency
+    private java.math.BigDecimal targetPrice; // Changed from String to Double for consistency
     private String gainOrLoss;
     private String triggerReason; 
     

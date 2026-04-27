@@ -14,49 +14,35 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@lombok.RequiredArgsConstructor
 public class UserService {
 
-    @Autowired
-    private UserRepo userRepo;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    @Autowired
-    private AuthenticationManager authenticationManager;
-
-    @Autowired
-    private JwtUtils jwtUtils;
-
-    @Autowired
-    private UserDetailsService userDetailsService;
-
-    @Autowired
-    private PortfolioService portfolioService;
+    private final UserRepo userRepo;
+    private final PasswordEncoder passwordEncoder;
+    private final AuthenticationManager authenticationManager;
+    private final JwtUtils jwtUtils;
+    private final UserDetailsService userDetailsService;
+    private final PortfolioService portfolioService;
 
     @Transactional
-    public UserModel register(UserModel userModel){
-        System.out.println("Checking existence for email: " + userModel.getEmail());
-        boolean exists = userRepo.existsByEmail(userModel.getEmail());
-        System.out.println("Email exists: " + exists);
-        
-        if(exists){
+    public UserResponseDTO register(RegistrationRequestDTO dto){
+        if(userRepo.existsByEmail(dto.getEmail())){
             throw new UserNotFoundException("User already exists in our database");
-        }else{
-            System.out.println("Encoding password for user: " + userModel.getName());
-            userModel.setPassword(passwordEncoder.encode(userModel.getPassword()));
-            UserModel savedUser = userRepo.save(userModel);
-            System.out.println("User saved with ID: " + savedUser.getUserId());
-            
-            // Auto-create initial portfolio for UX
-            Portfolio defaultPortfolio = new Portfolio();
-            defaultPortfolio.setUserId(savedUser.getUserId());
-            defaultPortfolio.setPortfolioName("My Learning Portfolio 🎒");
-            portfolioService.addPortfolio(defaultPortfolio);
-            System.out.println("Default portfolio created for user: " + savedUser.getUserId());
-            
-            return savedUser;
         }
+        
+        User user = new User();
+        user.setName(dto.getName());
+        user.setEmail(dto.getEmail());
+        user.setPassword(passwordEncoder.encode(dto.getPassword()));
+        
+        User savedUser = userRepo.save(user);
+        
+        // Auto-create initial portfolio for UX
+        Portfolio defaultPortfolio = new Portfolio();
+        defaultPortfolio.setPortfolioName("My Learning Portfolio 🎒");
+        portfolioService.addPortfolio(defaultPortfolio, savedUser);
+        
+        return UserResponseDTO.fromEntity(savedUser);
     }
 
     public String login(String email, String password){
@@ -70,20 +56,25 @@ public class UserService {
         return jwtUtils.generateToken(userDetails);
     }
 
-    public UserModel getUserByEmail(String email) {
+    public User getUserByEmail(String email) {
         return userRepo.findByEmail(email)
                 .orElseThrow(() -> new UserNotFoundException("User not found: " + email));
     }
 
-    public UserModel editProfile(String email, UserModel userModel){
+    @Transactional
+    public UserResponseDTO editProfile(String email, ProfileUpdateRequestDTO dto){
+        // Security Check: Ensure the logged-in user is only editing their own profile
+        String loggedInEmail = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName();
+        if (!loggedInEmail.equalsIgnoreCase(email)) {
+            throw new RuntimeException("Unauthorized: You can only edit your own profile.");
+        }
+
         return userRepo.findByEmail(email)
-                .map(existed->{
-                    existed.setName(userModel.getName());
-                    existed.setEmail(userModel.getEmail());
-                    if (userModel.getPassword() != null && !userModel.getPassword().isEmpty()) {
-                        existed.setPassword(passwordEncoder.encode(userModel.getPassword()));
+                .map(existingUser -> {
+                    if (dto.getName() != null && !dto.getName().trim().isEmpty()) {
+                        existingUser.setName(dto.getName().trim());
                     }
-                    return userRepo.save(existed);
-                }).orElseThrow(()->new UserNotFoundException("Email not found: "+email));
+                    return UserResponseDTO.fromEntity(userRepo.save(existingUser));
+                }).orElseThrow(() -> new UserNotFoundException("Email not found: " + email));
     }
 }

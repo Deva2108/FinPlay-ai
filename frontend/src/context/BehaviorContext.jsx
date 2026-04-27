@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { getUserInsights } from '../services/api';
+import { getUserInsights, trackDecision } from '../services/api';
 
 const BehaviorContext = createContext();
 
@@ -38,6 +38,14 @@ export const BehaviorProvider = ({ children }) => {
       timestamp: Date.now(),
       marketMode
     };
+
+    // Fire and forget to backend
+    trackDecision({ 
+      symbol: stock.symbol, 
+      action, 
+      price: typeof stock.price === 'string' ? parseFloat(stock.price.replace(/,/g, '')) : (stock.price || 0), 
+      market: marketMode 
+    }).catch(console.error);
 
     setBehavior(prev => {
       const updatedDecisions = [newDecision, ...prev.decisions].slice(0, 50); 

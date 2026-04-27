@@ -1,17 +1,19 @@
 services:
   db:
-    image: mysql:8.0
-    container_name: mysql-db
+    image: postgres:15-alpine
+    container_name: postgres-db
     restart: always
     environment:
-      MYSQL_DATABASE: stocksdb
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rootpassword}
+      - POSTGRES_DB=stocksdb
+      - POSTGRES_USER=${DB_USERNAME}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
     ports:
-      - "3306:3306"
+      - "5444:5432"
     healthcheck:
-      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d stocksdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:alpine
@@ -19,6 +21,11 @@ services:
     restart: always
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   app:
     build: .
@@ -26,15 +33,19 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:mysql://db:3306/stocksdb?useSSL=false&allowPublicKeyRetrieval=true
-      - SPRING_DATASOURCE_USERNAME=root
-      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-rootpassword}
-      - SPRING_DATA_REDIS_HOST=redis
-      - SPRING_JPA_DIALECT=org.hibernate.dialect.MySQLDialect
-      - JWT_SECRET=${JWT_SECRET:-superSecretProductionKey123}
+      - DB_URL=jdbc:postgresql://db:5432/stocksdb
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRATION=${JWT_EXPIRATION}
       - STOCK_API_KEY=${STOCK_API_KEY}
+      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
+      - NEWS_API_KEY=${NEWS_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy

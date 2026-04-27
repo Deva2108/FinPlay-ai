@@ -38,6 +38,24 @@ const conceptLibrary = {
     explanation: "This is the final calculation of whether you are making money or losing it.",
     example: "Current Value minus Invested Amount = Your profit or loss.",
     why: "It is the most important number to track. It tells you exactly how your decisions are performing."
+  },
+  moat: {
+    title: "Competitive Edge (Moat)",
+    explanation: "A unique advantage that protects a company from its competitors, like a castle's moat.",
+    example: "Apple's brand and ecosystem or Coca-Cola's secret formula are powerful moats.",
+    why: "Companies with 'Wide Moats' are usually safer long-term investments because they are harder to beat."
+  },
+  peratio: {
+    title: "Value Score (P/E Ratio)",
+    explanation: "Price-to-Earnings ratio. It shows how much investors are willing to pay for every ₹1 of profit.",
+    example: "If a company earns ₹10 and its stock price is ₹200, its P/E ratio is 20.",
+    why: "A high P/E might mean a stock is expensive, while a low P/E might suggest it's a bargain (or in trouble)."
+  },
+  marketcap: {
+    title: "Price Tag (Market Cap)",
+    explanation: "The total value of a company if you bought every single share.",
+    example: "A company with 1 million shares at ₹100 each has a Market Cap of ₹10 Crores.",
+    why: "It helps you categorize companies into Large, Mid, or Small-cap, which determines their stability and growth potential."
   }
 };
 

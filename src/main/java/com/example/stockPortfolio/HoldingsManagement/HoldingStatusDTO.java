@@ -12,8 +12,8 @@ public class HoldingStatusDTO {
     private String companyName;
     private String sector;
     private int quantity;
-    private double buyPrice;
-    private double currentPrice;
-    private double gain;
-    private double gainPercentage;
+    private java.math.BigDecimal buyPrice;
+    private java.math.BigDecimal currentPrice;
+    private java.math.BigDecimal gain;
+    private java.math.BigDecimal gainPercentage;
 }

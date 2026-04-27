@@ -26,14 +26,18 @@ public class TransactionDTO {
     
     @DecimalMin(value = "1.0", message = "Price must be at least $1.00")
     @DecimalMax(value = "100000.0", message = "Price exceeds playground limits")
-    private double price;
+    private java.math.BigDecimal price;
     
     @NotBlank(message = "Transaction type (BUY/SELL) is required")
     private String type;
     
-    private LocalDateTime transactionDate;
-    private Double gain;
-    private Double gainPercentage;
-    private Double loss;
-    private Double lossPercentage;
+    private java.time.LocalDateTime transactionDate;
+    private String paymentStatus;
+    private String notes;
+    private java.time.LocalDateTime createdAt;
+    private java.time.LocalDateTime updatedAt;
+    private java.math.BigDecimal gain;
+    private java.math.BigDecimal gainPercentage;
+    private java.math.BigDecimal loss;
+    private java.math.BigDecimal lossPercentage;
 }

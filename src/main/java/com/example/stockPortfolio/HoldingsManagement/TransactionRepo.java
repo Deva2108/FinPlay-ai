@@ -5,4 +5,5 @@ import java.util.List;
 
 public interface TransactionRepo extends JpaRepository<Transaction, Long> {
     List<Transaction> findByUserIdAndPortfolioIdOrderByTransactionDateDesc(Long userId, Long portfolioId);
+    List<Transaction> findByUserId(Long userId);
 }
