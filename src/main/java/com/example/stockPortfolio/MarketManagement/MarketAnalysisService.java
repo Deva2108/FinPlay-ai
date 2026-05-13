@@ -3,67 +3,41 @@ package com.example.stockPortfolio.MarketManagement;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
 @lombok.RequiredArgsConstructor
 public class MarketAnalysisService {
 
-    private final FinnhubService finnhubService;
+    private final MarketGateway marketGateway;
+    private final StockUniverseRepo stockUniverseRepo;
 
-    private final Map<String, Map<String, Object>> cache = new ConcurrentHashMap<>();
-    private long lastCacheTime = 0;
-    private static final long CACHE_DURATION_MS = 60000; // 1 min
+    /**
+     * READ ONLY FROM GATEWAY.
+     */
+    public List<Map<String, Object>> getMarketData() {
+        List<StockUniverse> universe = stockUniverseRepo.findAll();
+        List<String> symbols = universe.stream()
+                .map(StockUniverse::getSymbol)
+                .toList();
+        
+        Map<String, Map<String, Object>> quotes = marketGateway.getBatchQuotes(symbols);
 
-    private static final List<Map<String, String>> UNIVERSE = Arrays.asList(
-            Map.of("symbol", "AAPL", "sector", "Tech", "marketCap", "Mega Cap"),
-            Map.of("symbol", "MSFT", "sector", "Tech", "marketCap", "Mega Cap"),
-            Map.of("symbol", "NVDA", "sector", "Tech", "marketCap", "Mega Cap"),
-            Map.of("symbol", "TSLA", "sector", "Automotive", "marketCap", "Mega Cap"),
-            Map.of("symbol", "META", "sector", "Tech", "marketCap", "Mega Cap"),
-            Map.of("symbol", "AMZN", "sector", "Tech", "marketCap", "Mega Cap"),
-            Map.of("symbol", "GOOGL", "sector", "Tech", "marketCap", "Mega Cap"),
-            Map.of("symbol", "AMD", "sector", "Tech", "marketCap", "Large Cap"),
-            Map.of("symbol", "INTC", "sector", "Tech", "marketCap", "Large Cap"),
-            Map.of("symbol", "NFLX", "sector", "Tech", "marketCap", "Large Cap"),
-            Map.of("symbol", "JPM", "sector", "Finance", "marketCap", "Mega Cap"),
-            Map.of("symbol", "V", "sector", "Finance", "marketCap", "Mega Cap"),
-            Map.of("symbol", "MA", "sector", "Finance", "marketCap", "Mega Cap"),
-            Map.of("symbol", "BAC", "sector", "Finance", "marketCap", "Large Cap"),
-            Map.of("symbol", "XOM", "sector", "Energy", "marketCap", "Mega Cap"),
-            Map.of("symbol", "CVX", "sector", "Energy", "marketCap", "Large Cap"),
-            Map.of("symbol", "JNJ", "sector", "Healthcare", "marketCap", "Large Cap"),
-            Map.of("symbol", "UNH", "sector", "Healthcare", "marketCap", "Mega Cap"),
-            Map.of("symbol", "WMT", "sector", "Retail", "marketCap", "Mega Cap"),
-            Map.of("symbol", "PG", "sector", "Consumer", "marketCap", "Large Cap"),
-            Map.of("symbol", "CRM", "sector", "Tech", "marketCap", "Large Cap"),
-            Map.of("symbol", "COST", "sector", "Retail", "marketCap", "Large Cap"),
-            Map.of("symbol", "AVGO", "sector", "Tech", "marketCap", "Large Cap"),
-            Map.of("symbol", "F", "sector", "Automotive", "marketCap", "Mid Cap"),
-            Map.of("symbol", "GM", "sector", "Automotive", "marketCap", "Mid Cap"),
-            Map.of("symbol", "SLB", "sector", "Energy", "marketCap", "Large Cap")
-    );
+        return universe.stream()
+                .map(u -> {
+                    String symbol = u.getSymbol();
+                    Map<String, Object> quote = quotes.get(symbol);
 
-    public synchronized List<Map<String, Object>> getMarketData() {
-        long now = System.currentTimeMillis();
-        if (now - lastCacheTime > CACHE_DURATION_MS || cache.isEmpty()) {
-            UNIVERSE.stream().forEach(u -> {
-                try {
-                    Map<String, Object> quote = finnhubService.getStockQuote(u.get("symbol"));
                     if (quote != null) {
                         Map<String, Object> enriched = new HashMap<>(quote);
-                        enriched.put("sector", u.get("sector"));
-                        enriched.put("marketCap", u.get("marketCap"));
-                        cache.put(u.get("symbol"), enriched);
+                        enriched.put("sector", u.getSector());
+                        enriched.put("marketCap", "Mid Cap");
+                        return enriched;
                     }
-                } catch (Exception e) {
-                    // Fail silently for individual stocks to keep the list populated
-                }
-            });
-            lastCacheTime = now;
-        }
-        return new ArrayList<>(cache.values());
+                    return null;
+                })
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
     }
 
     public List<Map<String, Object>> getGainers(String capFilter, String sectorFilter) {
@@ -132,6 +106,13 @@ public class MarketAnalysisService {
         return stockSector.equalsIgnoreCase(sectorFilter);
     }
 
+    public String getSectorForSymbol(String symbol) {
+        if (symbol == null) return "Other";
+        return stockUniverseRepo.findBySymbol(symbol)
+                .map(StockUniverse::getSector)
+                .orElse("Other");
+    }
+
     public List<Map<String, String>> getFamousInsights(String symbol) {
         List<Map<String, String>> allInsights = new ArrayList<>();
         
@@ -139,7 +120,7 @@ public class MarketAnalysisService {
             "investor", "Warren Buffett",
             "stock", "AAPL",
             "title", "The Power of Moat",
-            "podcastUrl", "https://www.youtube.com/watch?v=2a9Lx9J8uEs",
+            "podcastUrl", "https://www.youtube.com/watch?v=QdNR2G-3DI0",
             "message", "I don't look to jump over 7-foot bars: I look around for 1-foot bars that I can step over."
         ));
         
@@ -147,7 +128,7 @@ public class MarketAnalysisService {
             "investor", "Rakesh Jhunjhunwala",
             "stock", "TATA MOTORS",
             "title", "India's Structural Bull Run",
-            "podcastUrl", "https://www.youtube.com/watch?v=0A6vW0V0-pU",
+            "podcastUrl", "https://www.youtube.com/watch?v=A8O2A1-0O6U",
             "message", "Respect the market. Have an open mind. Know what to stake and when to take a loss."
         ));
 
@@ -155,15 +136,15 @@ public class MarketAnalysisService {
             "investor", "Cathie Wood",
             "stock", "TSLA",
             "title", "Disruptive Innovation",
-            "podcastUrl", "https://www.youtube.com/watch?v=mY9uI2O_fX8",
+            "podcastUrl", "https://www.youtube.com/watch?v=NUehKZBLBCQ",
             "message", "Innovation is the key to growth. We focus on the next big technology shifts."
         ));
 
         allInsights.add(Map.of(
             "investor", "Naval Ravikant",
             "stock", "ALL",
-            "title", "How to Get Rich",
-            "podcastUrl", "https://www.youtube.com/watch?v=1-TZqOsVCNM",
+            "title", "The Psychology of Money",
+            "podcastUrl", "https://www.youtube.com/watch?v=Xun73T7r4vE",
             "message", "Productize yourself. Wealth is assets that earn while you sleep."
         ));
 

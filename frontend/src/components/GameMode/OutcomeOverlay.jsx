@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, ArrowRight, BookOpen, Target, Zap, ShieldCheck, Briefcase, Bot, Sparkles, BrainCircuit } from 'lucide-react';
-import { useBehavior } from '../../context/BehaviorContext';
 import { useTrading } from '../../context/TradingContext';
 import { getLearningInsight } from '../../utils/learningEngine';
+import { formatPrice } from '../../utils/formatters';
 import MicroLearningCard from '../MicroLearningCard';
 
 const behavioralQuotes = [
@@ -15,8 +15,7 @@ const behavioralQuotes = [
 ];
 
 export default function OutcomeOverlay({ stock, choice, gameStep, streak, onNext, onReset, result }) {
-  const { decisions, missedOpportunities, userInsights } = useBehavior();
-  const { portfolio } = useTrading();
+  const { decisions, missedOpportunities, userInsights, portfolio } = useTrading();
 
   const isCorrect = (choice === 'buy' && stock.isPositive) || (choice === 'skip' && !stock.isPositive);
   
@@ -27,7 +26,7 @@ export default function OutcomeOverlay({ stock, choice, gameStep, streak, onNext
     switch (result.type) {
       case 'gain':
         return {
-          message: `This decision added ₹${result.amount} to your portfolio.`,
+          message: `This decision added ${formatPrice(result.amount, stock.currency || 'INR')} to your portfolio.`,
           color: 'text-emerald-400',
           bg: 'bg-emerald-500/10',
           border: 'border-emerald-500/20',
@@ -35,7 +34,7 @@ export default function OutcomeOverlay({ stock, choice, gameStep, streak, onNext
         };
       case 'loss':
         return {
-          message: `This move reduced your portfolio by ₹${Math.abs(result.amount)}.`,
+          message: `This move reduced your portfolio by ${formatPrice(Math.abs(result.amount), stock.currency || 'INR')}.`,
           color: 'text-rose-400',
           bg: 'bg-rose-500/10',
           border: 'border-rose-500/20',
@@ -43,7 +42,7 @@ export default function OutcomeOverlay({ stock, choice, gameStep, streak, onNext
         };
       case 'missed':
         return {
-          message: `You missed a potential ₹${result.amount} gain.`,
+          message: `You missed a potential ${formatPrice(result.amount, stock.currency || 'INR')} gain.`,
           color: 'text-amber-400',
           bg: 'bg-amber-500/10',
           border: 'border-amber-500/20',
@@ -162,11 +161,11 @@ export default function OutcomeOverlay({ stock, choice, gameStep, streak, onNext
                   </div>
 
                   <p className="text-white text-lg font-bold leading-relaxed relative z-10 pr-10">
-                    "{result?.aiMessage || (isCorrect 
+                    "{typeof result?.aiMessage === "string" ? result.aiMessage : (result?.aiMessage?.text || (isCorrect 
                       ? `Buying was a good move because the stock price went up. This adds real value to your portfolio.`
                       : choice === 'buy' 
                         ? `The price went down by ${stock.impact}. It is normal to feel an urge to buy, but checking the trend first helps avoid losses.`
-                        : `The price went up by ${stock.impact}. You decided to skip, which means you missed a ${missedGain}% gain. Next time, look for strong momentum.`)}"
+                        : `The price went up by ${stock.impact}. You decided to skip, which means you missed a ${missedGain}% gain. Next time, look for strong momentum.`))}"
                   </p>
                   
                   {result?.behaviorHighlight && (
@@ -195,7 +194,7 @@ export default function OutcomeOverlay({ stock, choice, gameStep, streak, onNext
                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Behavioral Pattern</span>
                     </div>
                     <p className="text-xs text-blue-100 font-bold leading-relaxed italic relative z-10">
-                      "{userInsights.insightMessage}"
+                      "{typeof userInsights.insightMessage === "string" ? userInsights.insightMessage : userInsights.insightMessage?.text || userInsights.insightMessage?.message || "Analyzing your behavioral DNA..."}"
                     </p>
                   </motion.div>
                 )}

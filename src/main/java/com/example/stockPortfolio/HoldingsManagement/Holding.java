@@ -30,9 +30,13 @@ public class Holding{
     @NotBlank(message = "Symbol is Required")
     private String symbol;
     @NotNull(message = "Quantity is Required" )
-    private int quantity;
+    @DecimalMin(value = "0.0001", inclusive = true, message = "Quantity must be at least 0.0001")
+    private BigDecimal quantity;
     @DecimalMin(value = "0.01",inclusive = true,message = "Value must be greater than or equal to 0.01")
     private BigDecimal buyPrice;
+
+    @jakarta.persistence.Version
+    private Long version;
 
     private java.time.LocalDateTime createdAt;
     private java.time.LocalDateTime updatedAt;
@@ -48,6 +52,4 @@ public class Holding{
         updatedAt = java.time.LocalDateTime.now();
     }
 
-    public Holding(long l, long l1, long l2, String aapl, int i, double v) {
-    }
 }

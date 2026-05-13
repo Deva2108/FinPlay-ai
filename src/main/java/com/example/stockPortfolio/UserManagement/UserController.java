@@ -15,25 +15,43 @@ import java.util.Map;
 public class UserController {
 
     private final UserService userService;
+    private final com.example.stockPortfolio.Security.CustomUserDetailsService customUserDetailsService;
 
     @PostMapping("/api/auth/register")
-    public ResponseEntity<ApiResponse<UserResponseDTO>> register(@Valid @RequestBody RegistrationRequestDTO registrationRequest){
-        UserResponseDTO saved = userService.register(registrationRequest);
+    public ResponseEntity<ApiResponse<LoginResponseDTO>> register(@Valid @RequestBody RegistrationRequestDTO registrationRequest){
+        LoginResponseDTO result = userService.register(registrationRequest);
+        // Decorate with admin flag so the freshly-registered user's UI knows whether to show /admin.
+        if (result.getUser() != null) {
+            result.getUser().setAdmin(customUserDetailsService.isAdminEmail(result.getUser().getEmail()));
+        }
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(saved, "User registered successfully"));
+                .body(ApiResponse.ok(result, "User registered successfully"));
     }
 
     @PostMapping("/api/auth/login")
     public ResponseEntity<ApiResponse<LoginResponseDTO>> login(@Valid @RequestBody LoginRequestDTO loginRequest){
         String token = userService.login(loginRequest.getEmail(), loginRequest.getPassword());
         User user = userService.getUserByEmail(loginRequest.getEmail());
-        
+
+        UserResponseDTO userDto = UserResponseDTO.fromEntity(user,
+                customUserDetailsService.isAdminEmail(user.getEmail()));
+
         LoginResponseDTO data = LoginResponseDTO.builder()
                 .token(token)
-                .user(UserResponseDTO.fromEntity(user))
+                .user(userDto)
                 .build();
-        
+
         return ResponseEntity.ok(ApiResponse.ok(data, "Login successful"));
+    }
+
+    /** Whoami — used by the frontend to refresh role on page reload (since JWTs don't carry it). */
+    @GetMapping("/api/auth/me")
+    public ResponseEntity<ApiResponse<UserResponseDTO>> me() {
+        String email = org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication().getName();
+        User user = userService.getUserByEmail(email);
+        UserResponseDTO dto = UserResponseDTO.fromEntity(user, customUserDetailsService.isAdminEmail(email));
+        return ResponseEntity.ok(ApiResponse.ok(dto, "ok"));
     }
 
     @PutMapping("/api/user/profile/{email}")

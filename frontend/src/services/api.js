@@ -18,6 +18,7 @@ export const API_ENDPOINTS = {
   PORTFOLIO: {
     BASE: '/api/portfolios',
     BALANCE: (id) => `/api/portfolios/${id}/balance`,
+    GAME_RESULT: (id) => `/api/portfolios/${id}/game-result`,
     MENTOR: (id) => `/api/portfolios/${id}/mentor`,
   },
   HOLDINGS: {
@@ -37,6 +38,10 @@ export const API_ENDPOINTS = {
     VIBE: '/api/market/vibe',
     PULSE: '/api/market/pulse',
     FAMOUS: '/api/market/insights/famous',
+    GAINERS: '/api/market/gainers',
+    LOSERS: '/api/market/losers',
+    TRENDING: '/api/market/trending',
+    SECTOR: '/api/market/sector',
   },
   DECISION: {
     BASE: '/api/decision',
@@ -54,6 +59,15 @@ export const API_ENDPOINTS = {
     },
     EXPLAIN: '/api/explain',
     TUTORIAL: '/api/tutorial/insight',
+  },
+  WATCHLIST: {
+    BASE: '/api/watchlist',
+    CHECK: (symbol) => `/api/watchlist/check/${symbol}`,
+    TOGGLE: (symbol) => `/api/watchlist/${symbol}`,
+  },
+  VAULT: {
+    DAILY: '/api/vault/daily',
+    CARDS: '/api/vault/cards',
   }
 };
 
@@ -89,176 +103,227 @@ api.interceptors.response.use(
 /**
  * Standard unwrap for the new ApiResponse structure:
  * { success: true, data: T, message: "" }
+ * Returns ONLY the 'data' field to maintain backward compatibility with components.
  */
-const unwrap = (response) => {
+export const unwrapApiResponse = (response) => {
   if (!response || !response.data) return null;
+  
   // If backend returns the standardized ApiResponse
   if (response.data.success !== undefined) {
     return response.data.data;
   }
-  // Fallback for non-standardized or error responses
+  
+  // Fallback for non-standardized or legacy responses
   return response.data;
 };
 
+/**
+ * Returns the FULL envelope {success, data, meta} for components that need to check meta.status
+ */
+export const unwrapEnvelope = (response) => {
+  if (!response || !response.data) return { success: false, data: null, meta: { status: 'ERROR' } };
+  
+  if (response.data.success !== undefined) {
+    return response.data;
+  }
+  
+  return {
+    success: true,
+    data: response.data,
+    meta: { status: 'OK', source: 'legacy' }
+  };
+};
+
+export const readApiEnvelope = unwrapEnvelope;
+
 // Auth APIs
+function persistAuth(result) {
+  const token = result?.data?.token;
+  const user  = result?.data?.user;
+  if (token) localStorage.setItem('token', token);
+  if (user)  localStorage.setItem('finplay_user', JSON.stringify(user));
+}
+
 export const registerUser = async (data) => {
   const response = await api.post(API_ENDPOINTS.AUTH.REGISTER, data);
-  return unwrap(response);
+  const result = readApiEnvelope(response);
+  persistAuth(result);
+  return result;
 };
 
 export const loginUser = async (data) => {
   localStorage.removeItem('token');
+  localStorage.removeItem('finplay_user');
   const response = await api.post(API_ENDPOINTS.AUTH.LOGIN, data);
-  const result = unwrap(response);
-  const token = result?.token; 
-  if (token) {
-    localStorage.setItem('token', token);
-  }
+  const result = readApiEnvelope(response);
+  persistAuth(result);
   return result;
 };
 
 export const logoutUser = () => {
   localStorage.removeItem('token');
+  localStorage.removeItem('finplay_user');
 };
 
 // User APIs
 export const updateProfile = async (email, data) => {
   const response = await api.put(API_ENDPOINTS.USER.PROFILE(email), data);
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 // Trading & Portfolio APIs
 export const getPortfolio = async () => {
   const response = await api.get(API_ENDPOINTS.PORTFOLIO.BASE);
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getUserPortfolios = getPortfolio;
 
 export const getPortfolioMentorAdvice = async (portfolioId) => {
   const response = await api.get(API_ENDPOINTS.PORTFOLIO.MENTOR(portfolioId));
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const createPortfolio = async (name) => {
   const response = await api.post(API_ENDPOINTS.PORTFOLIO.BASE, { portfolioName: name });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const updatePortfolioBalance = async (portfolioId, amount) => {
   const response = await api.post(API_ENDPOINTS.PORTFOLIO.BALANCE(portfolioId), { amount });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
+
+export const recordGameResult = async (portfolioId, amount) => {
+  const response = await api.post(API_ENDPOINTS.PORTFOLIO.GAME_RESULT(portfolioId), { amount });
+  return readApiEnvelope(response);
+};
+
+// User-facing /api/portfolios/{id}/reset was removed (now admin-only at
+// /api/admin/users/{id}/reset). Keeping the export intentionally absent so any
+// stale UI call surfaces as a build error rather than a silent 404.
 
 // Holdings APIs
 export const getHoldings = async (portfolioId) => {
   const response = await api.get(API_ENDPOINTS.HOLDINGS.BASE, { params: { portfolioId } });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const executeTrade = async (tradeData) => {
   const response = await api.post(API_ENDPOINTS.HOLDINGS.BASE, tradeData);
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getTransactions = async (portfolioId) => {
   const response = await api.get(API_ENDPOINTS.HOLDINGS.TRANSACTIONS, { params: { portfolioId } });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 // Market Data APIs
+export const getLiveQuote = async (symbol) => {
+  const response = await api.get(API_ENDPOINTS.MARKET.QUOTE, { params: { symbol } });
+  return readApiEnvelope(response);
+};
+
 export const getLiveQuotes = async (symbols) => {
-  if (!Array.isArray(symbols) || symbols.length === 0) return [];
+  if (!Array.isArray(symbols) || symbols.length === 0) return { success: true, data: [], meta: { status: 'OK' } };
   const response = await api.get(API_ENDPOINTS.MARKET.QUOTES, { params: { symbols: symbols.join(',') } });
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 export const getQuotes = (symbols) => getLiveQuotes(symbols);
 
 export const getNews = async (query = 'stock market') => {
   const response = await api.get(API_ENDPOINTS.MARKET.NEWS, { params: { query } });
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 export const getStockDetails = async (symbol) => {
   const response = await api.get(API_ENDPOINTS.MARKET.DETAILS, { params: { symbol } });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
-export const getChartData = async (symbol) => {
-  const response = await api.get(API_ENDPOINTS.MARKET.CHART, { params: { symbol } });
-  return unwrap(response) || [];
+export const getChartData = async (symbol, timeframe = '1M') => {
+  const response = await api.get(API_ENDPOINTS.MARKET.CHART, { params: { symbol, timeframe } });
+  return readApiEnvelope(response);
 };
 
 export const getIndices = async (marketType = 'US') => {
   const response = await api.get(API_ENDPOINTS.MARKET.INDICES, { params: { marketType } });
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 export const getIndexInsight = async (symbol, value, change, marketType) => {
   const response = await api.get(API_ENDPOINTS.MARKET.INDEX_INSIGHT, { params: { symbol, value, change, marketType } });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getMarketVibe = async (marketType) => {
   const response = await api.get(API_ENDPOINTS.MARKET.VIBE, { params: { marketType } });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
+
+export const getMarketVibeResponse = getMarketVibe;
 
 export const getMarketPulse = async (portfolioId) => {
   const response = await api.get(API_ENDPOINTS.MARKET.PULSE, { params: { portfolioId } });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getFamousInsights = async (symbol) => {
   const response = await api.get(API_ENDPOINTS.MARKET.FAMOUS, { params: { symbol } });
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 export const searchStocks = async (q, signal) => {
   const response = await api.get(API_ENDPOINTS.MARKET.SEARCH, { params: { q }, signal });
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 export const getGainers = async (cap, sector) => {
   const response = await api.get(API_ENDPOINTS.MARKET.GAINERS, { params: { cap, sector } });
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 export const getLosers = async (cap, sector) => {
   const response = await api.get(API_ENDPOINTS.MARKET.LOSERS, { params: { cap, sector } });
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 export const getTrending = async () => {
   const response = await api.get(API_ENDPOINTS.MARKET.TRENDING);
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 export const getBySector = async (name) => {
   const response = await api.get(API_ENDPOINTS.MARKET.SECTOR, { params: { name } });
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 // Insight & AI APIs
 export const trackDecision = async (decisionData) => {
   const response = await api.post(API_ENDPOINTS.DECISION.BASE, decisionData);
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const explainStock = async (stockData) => {
   const response = await api.post(API_ENDPOINTS.AI.EXPLAIN, stockData);
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getDecisionStats = async () => {
   const response = await api.get(API_ENDPOINTS.DECISION.STATS);
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getUserInsights = async () => {
   const response = await api.get(API_ENDPOINTS.DECISION.INSIGHTS);
-  return unwrap(response);
+  return readApiEnvelope(response);
+};
+
+export const getRecentDecisions = async () => {
+  const response = await api.get(API_ENDPOINTS.DECISION.BASE);
+  return readApiEnvelope(response);
 };
 
 export const getInsights = (symbol) => {
@@ -268,35 +333,100 @@ export const getInsights = (symbol) => {
 
 export const getArchetype = async () => {
   const response = await api.get(API_ENDPOINTS.DECISION.ARCHETYPE);
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const evaluateDecision = async (evaluationData) => {
   const response = await api.post(API_ENDPOINTS.DECISION.EVALUATE, evaluationData);
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getOnboardingScenario = async (userType) => {
   const response = await api.post(API_ENDPOINTS.AI.ONBOARDING.SCENARIO, { userType });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getArenaScenarios = async (marketType) => {
   const response = await api.get(API_ENDPOINTS.AI.ONBOARDING.SCENARIOS, { params: { marketType } });
-  return unwrap(response) || [];
+  return readApiEnvelope(response);
 };
 
 export const getOnboardingFeedback = async (choice, userType) => {
   const response = await api.post(API_ENDPOINTS.AI.ONBOARDING.FEEDBACK, { choice, userType });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getArenaSummary = async (decisions) => {
   const response = await api.post(API_ENDPOINTS.AI.ONBOARDING.SUMMARY, { decisions });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
 
 export const getTutorialInsight = async (topic, context) => {
   const response = await api.get(API_ENDPOINTS.AI.TUTORIAL, { params: { topic, context } });
-  return unwrap(response);
+  return readApiEnvelope(response);
 };
+
+export const getTutorialInsightResponse = getTutorialInsight;
+
+// Watchlist APIs
+export const getWatchlist = async () => {
+  const response = await api.get(API_ENDPOINTS.WATCHLIST.BASE);
+  return readApiEnvelope(response);
+};
+
+export const addToWatchlist = async (symbol) => {
+  const response = await api.post(API_ENDPOINTS.WATCHLIST.TOGGLE(symbol));
+  return readApiEnvelope(response);
+};
+
+export const removeFromWatchlist = async (symbol) => {
+  const response = await api.delete(API_ENDPOINTS.WATCHLIST.TOGGLE(symbol));
+  return readApiEnvelope(response);
+};
+
+export const checkWatchlist = async (symbol) => {
+  const response = await api.get(API_ENDPOINTS.WATCHLIST.CHECK(symbol));
+  return readApiEnvelope(response);
+};
+
+export const getVaultDaily = async () => {
+  const response = await api.get(API_ENDPOINTS.VAULT.DAILY);
+  return readApiEnvelope(response);
+};
+
+export const getVaultCards = async () => {
+  const response = await api.get(API_ENDPOINTS.VAULT.CARDS);
+  return readApiEnvelope(response);
+};
+
+// ============================================================
+//   Admin API (gated server-side by ROLE_ADMIN — env ADMIN_EMAILS)
+// ============================================================
+
+export const ADMIN_ENDPOINTS = {
+  ME:            '/api/auth/me',
+  USERS:         '/api/admin/users',
+  USER:          (id) => `/api/admin/users/${id}`,
+  USER_RESET:    (id) => `/api/admin/users/${id}/reset`,
+  USER_DISABLE:  (id) => `/api/admin/users/${id}/disable`,
+  USER_ENABLE:   (id) => `/api/admin/users/${id}/enable`,
+  USER_PWD:      (id) => `/api/admin/users/${id}/reset-password`,
+  USER_BALANCE:  (id) => `/api/admin/users/${id}/balance`,
+  LEADERBOARD:   '/api/admin/leaderboard',
+  EVENT_BONUS:   '/api/admin/event/bonus',
+  STATS:         '/api/admin/stats',
+  AUDIT:         '/api/admin/audit',
+};
+
+export const fetchMe              = ()       => api.get(ADMIN_ENDPOINTS.ME).then(readApiEnvelope);
+export const adminListUsers       = ()       => api.get(ADMIN_ENDPOINTS.USERS).then(readApiEnvelope);
+export const adminGetUser         = (id)     => api.get(ADMIN_ENDPOINTS.USER(id)).then(readApiEnvelope);
+export const adminResetUser       = (id)     => api.post(ADMIN_ENDPOINTS.USER_RESET(id)).then(readApiEnvelope);
+export const adminDisableUser     = (id)     => api.post(ADMIN_ENDPOINTS.USER_DISABLE(id)).then(readApiEnvelope);
+export const adminEnableUser      = (id)     => api.post(ADMIN_ENDPOINTS.USER_ENABLE(id)).then(readApiEnvelope);
+export const adminResetPassword   = (id)     => api.post(ADMIN_ENDPOINTS.USER_PWD(id)).then(readApiEnvelope);
+export const adminAdjustBalance   = (id, b)  => api.post(ADMIN_ENDPOINTS.USER_BALANCE(id), b).then(readApiEnvelope);
+export const adminLeaderboard     = ()       => api.get(ADMIN_ENDPOINTS.LEADERBOARD).then(readApiEnvelope);
+export const adminBonusEvent      = (b)      => api.post(ADMIN_ENDPOINTS.EVENT_BONUS, b).then(readApiEnvelope);
+export const adminStats           = ()       => api.get(ADMIN_ENDPOINTS.STATS).then(readApiEnvelope);
+export const adminAudit           = (limit=100) => api.get(ADMIN_ENDPOINTS.AUDIT, { params: { limit } }).then(readApiEnvelope);

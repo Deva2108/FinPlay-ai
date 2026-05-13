@@ -8,8 +8,9 @@ const sectorData = [
   { name: "Energy", value: 5 }
 ];
 
-const PortfolioFlowInsight = () => {
-  const overexposedSector = sectorData.find(s => s.value > 60);
+const PortfolioFlowInsight = ({ data }) => {
+  const finalData = (data && data.length > 0) ? data : sectorData;
+  const overexposedSector = finalData.find(s => s.value > 60);
 
   return (
     <motion.div 
@@ -34,11 +35,11 @@ const PortfolioFlowInsight = () => {
       </div>
 
       <div className="space-y-2.5">
-        {(sectorData || []).map((sector) => (
+        {(finalData || []).map((sector) => (
           <div key={sector.name} className="space-y-1">
             <div className="flex justify-between items-center text-[10px] font-medium">
               <span className="text-slate-400 opacity-70 uppercase tracking-wider">{sector.name}</span>
-              <span className="text-white">{sector.value}%</span>
+              <span className="text-white">{Math.round(sector.value)}%</span>
             </div>
             <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden p-0.5">
               <motion.div 

@@ -1,12 +1,21 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, BarChart3, Lightbulb } from 'lucide-react';
+import { LayoutDashboard, Briefcase, BarChart3, Lightbulb, History, Shield, Crown } from 'lucide-react';
 
 export default function Sidebar() {
+  // The cached user object (written by loginUser) tells us if /admin should appear.
+  // Server still authoritative — clicking /admin without ROLE_ADMIN hits 403.
+  let cachedUser = null;
+  try { cachedUser = JSON.parse(localStorage.getItem('finplay_user') || 'null'); } catch (_) { /* noop */ }
+  const isAdmin = !!cachedUser?.admin;
+
   const navItems = [
     { path: '/', name: 'Dashboard', icon: LayoutDashboard },
     { path: '/portfolio', name: 'Portfolio', icon: Briefcase },
     { path: '/market', name: 'Live Market', icon: BarChart3 },
+    { path: '/vault', name: 'Vault', icon: Shield },
+    { path: '/history', name: 'Arena Log', icon: History },
     { path: '/insights', name: 'Insights', icon: Lightbulb },
+    ...(isAdmin ? [{ path: '/admin', name: 'Admin', icon: Crown }] : []),
   ];
 
   return (

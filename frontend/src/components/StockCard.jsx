@@ -1,10 +1,12 @@
 import { motion } from 'framer-motion';
 import ChartComponent from './ChartComponent';
+import { formatPrice } from '../utils/formatters';
 
 export default function StockCard({ stock, index, onHoverStart, onHoverEnd, isHovered }) {
   const isProfit = stock.gain >= 0;
   const color = isProfit ? '#22c55e' : '#ef4444';
   const glowClass = isProfit ? 'text-glow-green' : 'text-glow-red';
+  const currency = stock.currency || 'INR';
 
   return (
     <motion.div
@@ -15,7 +17,6 @@ export default function StockCard({ stock, index, onHoverStart, onHoverEnd, isHo
       onHoverEnd={onHoverEnd}
       className="glass rounded-2xl p-6 relative overflow-hidden group cursor-pointer border border-white/5 hover:border-white/20 transition-all"
     >
-      {/* Background gradient hint */}
       <div className={`absolute top-0 right-0 w-32 h-32 blur-[50px] rounded-full opacity-20 pointer-events-none transition-all duration-500 ${isProfit ? 'bg-neonGreen' : 'bg-neonRed'} ${isHovered ? 'scale-150 opacity-40' : ''}`} />
 
       <div className="flex justify-between items-start mb-6">
@@ -24,7 +25,7 @@ export default function StockCard({ stock, index, onHoverStart, onHoverEnd, isHo
           <p className="text-gray-400 text-sm">{stock.name}</p>
         </div>
         <div className="text-right">
-          <h3 className="text-xl font-bold text-white">${stock.currentPrice}</h3>
+          <h3 className="text-xl font-bold text-white">{formatPrice(stock.currentPrice, currency)}</h3>
           <p className={`text-sm font-bold ${isProfit ? 'text-neonGreen' : 'text-neonRed'} ${glowClass}`}>
             {isProfit ? '+' : ''}{stock.gain}%
           </p>
@@ -38,12 +39,12 @@ export default function StockCard({ stock, index, onHoverStart, onHoverEnd, isHo
         </div>
         <div className="bg-darker/50 p-3 rounded-xl border border-white/5">
           <span className="text-gray-500 block mb-1">Avg Price</span>
-          <span className="text-white font-bold">${stock.avgPrice}</span>
+          <span className="text-white font-bold">{formatPrice(stock.avgPrice, currency)}</span>
         </div>
       </div>
 
       <div className="h-16 mb-6 opacity-60 group-hover:opacity-100 transition-opacity">
-        <ChartComponent data={stock.chart} color={color} height={60} />
+        <ChartComponent data={stock.chart} meta={stock.meta} color={color} height={60} />
       </div>
 
       <div className="flex gap-3">

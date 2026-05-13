@@ -19,20 +19,24 @@ const MicroLearningCard = ({ insight, variant = "default" }) => {
         <span className="px-2 py-0.5 rounded-lg bg-blue-500 text-white text-[8px] font-black uppercase tracking-widest">
           Micro Learning
         </span>
-        <h4 className="text-xs font-black text-blue-400 uppercase tracking-widest">{insight.topic}</h4>
+        <h4 className="text-xs font-black text-blue-400 uppercase tracking-widest">
+          {typeof insight.topic === "string" ? insight.topic : insight.topic?.text || "Wealth Intelligence"}
+        </h4>
       </div>
 
       <div className="space-y-1 relative z-10">
-        <p className="text-sm font-bold text-white leading-tight">{insight.message}</p>
+        <p className="text-sm font-bold text-white leading-tight">
+          {typeof insight.message === "string" ? insight.message : insight.message?.text || insight.message?.message || "Preparing your personalized insight..."}
+        </p>
         <p className="text-xs text-slate-400 font-medium leading-relaxed italic opacity-80">
-          "{insight.explanation}"
+          "{typeof insight.explanation === "string" ? insight.explanation : insight.explanation?.text || insight.explanation?.message || "Our AI is analyzing your latest moves to find the deeper pattern."}"
         </p>
       </div>
 
       <div className="pt-2 flex items-center gap-2 border-t border-white/5">
         <Lightbulb size={12} className="text-yellow-500" />
         <p className="text-[10px] font-bold text-blue-100/60 uppercase tracking-tighter">
-          Why it matters: {insight.why}
+          Why it matters: {typeof insight.why === "string" ? insight.why : insight.why?.text || "Understanding this builds long-term intuition."}
         </p>
       </div>
     </motion.div>

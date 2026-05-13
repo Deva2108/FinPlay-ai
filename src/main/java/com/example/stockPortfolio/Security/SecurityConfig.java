@@ -19,11 +19,13 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 @Configuration
 @EnableWebSecurity
+@org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity(prePostEnabled = true)
 @lombok.RequiredArgsConstructor
 public class SecurityConfig {
 
     private final JwtRequestFilter jwtRequestFilter;
     private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
+    private final LoginRateLimitFilter loginRateLimitFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -31,15 +33,27 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(jwtAuthenticationEntryPoint))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/tutorial/insight").permitAll()
+                        // Public auth endpoints. `/api/auth/me` is intentionally NOT here —
+                        // it needs the authentication context to identify the caller.
+                        .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
+                        .requestMatchers("/admin/**", "/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/tutorial/insight").authenticated()
+                        .requestMatchers("/api/content/**").authenticated()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/webjars/**", "/swagger-resources/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .headers(headers -> headers.frameOptions(frame -> frame.disable()));
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.deny())
+                        .contentTypeOptions(c -> {})
+                        .referrerPolicy(r -> r.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                        .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31536000))
+                );
 
+        // Order matters: rate-limit BEFORE jwt (cheap reject on brute force);
+        // both BEFORE the standard username/password filter.
+        http.addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(jwtRequestFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
@@ -59,13 +73,41 @@ public class SecurityConfig {
                 .bearerFormat("JWT");
     }
 
+    /**
+     * BCrypt strength 12 — ~250 ms/login on a modest server. Stronger than the
+     * default (10) without becoming a DoS vector. Existing strength-10 hashes
+     * still verify correctly because bcrypt encodes the cost in the hash itself.
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        return new BCryptPasswordEncoder(12);
     }
 
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
         return authenticationConfiguration.getAuthenticationManager();
+    }
+
+    /**
+     * {@link LoginRateLimitFilter} and {@link JwtRequestFilter} are {@code @Component}
+     * beans, so Spring Boot would register them as global servlet filters AND we add
+     * them to the SecurityFilterChain via {@code addFilterBefore}. Without these two
+     * disablers each filter would run twice per request — for the rate limiter that
+     * would halve the user-visible budget (5/min instead of 10/min).
+     */
+    @Bean
+    public org.springframework.boot.web.servlet.FilterRegistrationBean<LoginRateLimitFilter>
+            disableLoginRateLimitAutoRegistration(LoginRateLimitFilter f) {
+        var reg = new org.springframework.boot.web.servlet.FilterRegistrationBean<>(f);
+        reg.setEnabled(false);
+        return reg;
+    }
+
+    @Bean
+    public org.springframework.boot.web.servlet.FilterRegistrationBean<JwtRequestFilter>
+            disableJwtRequestFilterAutoRegistration(JwtRequestFilter f) {
+        var reg = new org.springframework.boot.web.servlet.FilterRegistrationBean<>(f);
+        reg.setEnabled(false);
+        return reg;
     }
 }

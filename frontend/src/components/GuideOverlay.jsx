@@ -39,7 +39,7 @@ export default function GuideOverlay({ step, totalSteps, title, content, active,
           <div className="space-y-2">
             <h3 className="text-lg font-black text-white tracking-tight uppercase leading-none">{title}</h3>
             <p className="text-blue-100/70 text-xs font-medium leading-relaxed italic border-l-2 border-blue-500/30 pl-4 py-0.5 min-h-[40px]">
-              {content}
+              {typeof content === "string" ? content : content?.text || content?.message || "Loading guidance..."}
             </p>
           </div>
 

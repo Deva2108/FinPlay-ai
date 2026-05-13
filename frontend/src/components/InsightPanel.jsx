@@ -18,7 +18,19 @@ export default function InsightPanel({ isOpen, onClose, content }) {
 
   if (!content) return null;
 
-  const { title, explanation, data, insight, actions, type } = content;
+  const normalizedContent = typeof content === 'string'
+    ? { title: 'Insight', explanation: content }
+    : content;
+
+  if (!normalizedContent || typeof normalizedContent !== 'object') return null;
+
+  const { title, explanation, data, insight, actions, type } = normalizedContent;
+  const normalizedData = Array.isArray(data) ? data : [];
+  const normalizedActions = Array.isArray(actions) ? actions : [];
+  const insightObject = insight && typeof insight === 'object' && !Array.isArray(insight) ? insight : null;
+  const insightText = typeof insight === 'string' ? insight.trim() : '';
+  const safeTitle = typeof title === 'string' && title.trim() ? title : 'Insight';
+  const safeExplanation = typeof explanation === 'string' && explanation.trim() ? explanation : '';
 
   const getIcon = () => {
     switch (type) {
@@ -58,7 +70,7 @@ export default function InsightPanel({ isOpen, onClose, content }) {
                 <div className="p-2 bg-white/5 rounded-xl border border-white/5">
                   {getIcon()}
                 </div>
-                <h3 className="text-xl font-black text-white tracking-tight">{title}</h3>
+                <h3 className="text-xl font-black text-white tracking-tight">{safeTitle}</h3>
               </div>
               <button 
                 onClick={onClose}
@@ -72,25 +84,25 @@ export default function InsightPanel({ isOpen, onClose, content }) {
             <div className="p-6 overflow-y-auto flex-1 space-y-8 no-scrollbar pb-32 md:pb-6">
               
               {/* Explanation Section */}
-              {explanation && (
+              {safeExplanation && (
                 <section className="space-y-3">
                   <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
                     <Info size={12} /> What this means
                   </h4>
                   <p className="text-sm text-slate-300 font-medium leading-relaxed bg-white/5 p-4 rounded-2xl border border-white/5">
-                    {explanation}
+                    {safeExplanation}
                   </p>
                 </section>
               )}
 
               {/* Data Breakdown Section */}
-              {data && data.length > 0 && (
+              {normalizedData.length > 0 && (
                 <section className="space-y-3">
                   <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                     Data Breakdown
                   </h4>
                   <div className="space-y-2">
-                    {(data || []).map((item, idx) => (
+                    {normalizedData.map((item, idx) => (
                       <div key={idx} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-xl border border-white/5">
                         <span className="text-xs font-bold text-slate-300">{item.label}</span>
                         <span className={`text-sm font-black ${item.color || 'text-white'}`}>
@@ -103,10 +115,10 @@ export default function InsightPanel({ isOpen, onClose, content }) {
               )}
 
               {/* Visual Bar Split (if requested in data) */}
-              {data && data.some(d => d.progress) && (
+              {normalizedData.some(d => d && d.progress) && (
                 <section className="space-y-2">
                    <div className="h-2 w-full flex rounded-full overflow-hidden gap-0.5 bg-slate-800">
-                      {(data || []).filter(d => d.progress).map((item, idx) => (
+                      {normalizedData.filter(d => d && d.progress).map((item, idx) => (
                          <div 
                            key={idx} 
                            style={{ width: `${item.progress}%`, backgroundColor: item.barColor || '#3b82f6' }}
@@ -117,25 +129,108 @@ export default function InsightPanel({ isOpen, onClose, content }) {
                 </section>
               )}
 
-              {/* Insight / AI Reasoning */}
-              {insight && (
-                <section className="space-y-3">
+              {/* Insight / Smart Reasoning */}
+              {(insightText || insightObject) && (
+                <section className="space-y-4">
                   <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
-                    <Zap size={12} /> System Intelligence
+                    <Zap size={12} /> Smart Intelligence
                   </h4>
-                  <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-600/10 to-purple-600/10 border border-blue-500/20 relative overflow-hidden">
+                  <div className="p-5 rounded-2xl bg-gradient-to-br from-blue-600/10 to-purple-600/10 border border-blue-500/20 relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-2 opacity-10"><Zap size={40} /></div>
-                    <p className="text-sm font-bold text-blue-100 leading-relaxed relative z-10">
-                      {insight}
-                    </p>
+                    
+                    <div className="relative z-10 space-y-4">
+                      {insightText ? (
+                        <p className="text-sm font-bold text-blue-100 leading-relaxed">
+                          {insightText}
+                        </p>
+                      ) : insightObject && Object.keys(insightObject).length > 0 ? (
+                        <>
+                          {/* WHAT HAPPENED */}
+                          <div className="space-y-1">
+                            <p className="text-sm font-black text-white">{typeof insightObject.whatHappened === "string" ? insightObject.whatHappened : insightObject.whatHappened?.text || insightObject.whatHappened?.message || 'Market data is currently being analyzed.'}</p>
+                            <p className="text-xs font-bold text-blue-200/70">{typeof insightObject.whyItMatters === "string" ? insightObject.whyItMatters : insightObject.whyItMatters?.text || insightObject.whyItMatters?.message || 'Observe price action for potential trend shifts.'}</p>
+                          </div>
+
+                          {/* IMPACTS */}
+                          <div className="grid grid-cols-2 gap-2">
+                             {(insightObject.globalImpact) && (
+                               <div className="p-3 rounded-xl bg-white/5 border border-white/5">
+                                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Global Impact</p>
+                                 <p className="text-[10px] font-bold text-white leading-tight">{insightObject.globalImpact}</p>
+                               </div>
+                             )}
+                             {(insightObject.indiaImpact) && (
+                               <div className="p-3 rounded-xl bg-white/5 border border-white/5">
+                                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">India Impact</p>
+                                 <p className="text-[10px] font-bold text-white leading-tight">{insightObject.indiaImpact}</p>
+                               </div>
+                             )}
+                          </div>
+
+                          {/* ANALOGY */}
+                          {(insightObject.analogy) && (
+                            <div className="bg-white/5 p-3 rounded-xl border border-white/5 italic">
+                              <p className="text-xs text-blue-100/90 leading-relaxed">
+                                "Think of it like this: {typeof insightObject.analogy === "string" ? insightObject.analogy : insightObject.analogy?.text || insightObject.analogy?.message || ''}"
+                              </p>
+                            </div>
+                          )}
+
+                          {/* PERSPECTIVE & LEARN */}
+                          <div className="space-y-2">
+                             {(insightObject.whatYouCanLearn) && (
+                               <div className="flex items-start gap-2">
+                                 <div className="w-1 h-1 rounded-full bg-blue-400 mt-1.5 shrink-0" />
+                                 <p className="text-xs font-bold text-white">{typeof insightObject.whatYouCanLearn === "string" ? insightObject.whatYouCanLearn : insightObject.whatYouCanLearn?.text || insightObject.whatYouCanLearn?.message || ''}</p>
+                               </div>
+                             )}
+                             {(insightObject.investorPerspective) && (
+                               <p className="text-[10px] text-purple-300 font-black italic border-l-2 border-purple-500/40 pl-3 py-1">
+                                  {typeof insightObject.investorPerspective === "string" ? insightObject.investorPerspective : insightObject.investorPerspective?.text || insightObject.investorPerspective?.message || ''}
+                                </p>
+                             )}
+                          </div>
+
+                          {/* Technical Footnote / ML Teaser */}
+                          <div className="pt-2 flex items-center justify-between border-t border-white/5">
+                            <div className="flex items-center gap-2">
+                               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                               <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Logic: Deterministic Engine v1.5</span>
+                            </div>
+                            <span className="text-[8px] font-black text-blue-500/50 uppercase tracking-widest italic">Deep ML Predictor v2.0 Coming Soon</span>
+                          </div>
+
+                          {/* RESOURCES */}
+                          {Array.isArray(insightObject.resources) && insightObject.resources.length > 0 && (
+                            <div className="pt-2 flex flex-wrap gap-2">
+                              {insightObject.resources.map((res, idx) => (
+                                <a 
+                                  key={idx} 
+                                  href={res?.url || '#'} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-[9px] font-black text-blue-400 uppercase tracking-widest bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg border border-blue-500/20 transition-colors inline-block"
+                                >
+                                  {res?.title || 'Learn More'}
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-sm font-bold text-blue-100 leading-relaxed">
+                          Market context is currently being analyzed. Please check back shortly for deeper insights.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </section>
               )}
 
               {/* Action Buttons */}
-              {actions && actions.length > 0 && (
+              {normalizedActions.length > 0 && (
                 <section className="pt-4 border-t border-white/5 space-y-3">
-                  {(actions || []).map((action, idx) => (
+                  {normalizedActions.map((action, idx) => (
                     <button
                       key={idx}
                       onClick={() => {

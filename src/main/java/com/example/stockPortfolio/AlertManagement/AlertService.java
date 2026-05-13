@@ -1,14 +1,13 @@
 package com.example.stockPortfolio.AlertManagement;
 
-import com.example.stockPortfolio.HoldingsManagement.FmpStockPriceService;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.example.stockPortfolio.HoldingsManagement.ApiResponse;
+import com.example.stockPortfolio.MarketManagement.MarketGateway;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -18,7 +17,7 @@ public class AlertService {
 
     private final AlertRepo alertRepo;
     private final AlertHistoryRepo historyRepo;
-    private final FmpStockPriceService fmpService;
+    private final MarketGateway marketGateway;
 
     private static final double RANGE_BUFFER = 0.01; // 1% buffer
     private static final long COOLDOWN_MINUTES = 60; // Don't re-trigger same alert for 1 hour
@@ -33,42 +32,36 @@ public class AlertService {
         return historyRepo.findByUserIdOrderByTriggeredAtDesc(userId);
     }
 
+    /**
+     * READ ONLY FROM MIRROR.
+     * This engine no longer triggers external API calls.
+     */
     @Scheduled(fixedRate = 180000) // 3 mins
     public void runSmartAlertEngine() {
-        List<Alert> alerts = alertRepo.findAll();
-        if (alerts.isEmpty()) return;
+        List<String> symbols = alertRepo.findAllDistinctSymbols();
+        if (symbols.isEmpty()) return;
 
-        Set<String> uniqueSymbols = alerts.stream().map(Alert::getSymbol).collect(Collectors.toSet());
-        
-        // Fetch all quotes in parallel
-        List<CompletableFuture<Void>> futures = uniqueSymbols.stream()
-            .map(symbol -> CompletableFuture.runAsync(() -> {
-                // The cache in fmpService will handle repeated calls efficiently
-                fmpService.getFullQuote(symbol);
-            }))
-            .collect(Collectors.toList());
+        Map<String, Map<String, Object>> quotes = marketGateway.getBatchQuotes(symbols);
 
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        // Process in batches or by symbol to avoid large heap usage
+        LocalDateTime cooldownCutoff = LocalDateTime.now().minusMinutes(COOLDOWN_MINUTES);
+        for (String symbol : symbols) {
+            Map<String, Object> quote = quotes.get(symbol);
+            if (quote == null || !quote.containsKey("price")) continue;
 
-        for (Alert alert : alerts) {
-            try {
-                if (alert.getLastTriggeredAt() != null && 
-                    alert.getLastTriggeredAt().isAfter(LocalDateTime.now().minusMinutes(COOLDOWN_MINUTES))) {
-                    continue;
+            double currentPrice = Double.parseDouble(quote.get("price").toString());
+            List<Alert> alerts = alertRepo.findActiveBySymbol(symbol, cooldownCutoff);
+
+            for (Alert alert : alerts) {
+                try {
+                    if (alert.getAlertType() == Alert.AlertType.USER) {
+                        processUserAlert(alert, currentPrice);
+                    } else {
+                        processAutoAlerts(alert, quote, currentPrice);
+                    }
+                } catch (Exception e) {
+                    log.error("Error processing alert for {}: {}", alert.getSymbol(), e.getMessage());
                 }
-
-                JsonNode quote = fmpService.getFullQuote(alert.getSymbol());
-                if (quote == null || !quote.has("price")) continue;
-
-                double currentPrice = quote.get("price").asDouble();
-                
-                if (alert.getAlertType() == Alert.AlertType.USER) {
-                    processUserAlert(alert, currentPrice);
-                } else {
-                    processAutoAlerts(alert, quote, currentPrice);
-                }
-            } catch (Exception e) {
-                log.error("Error processing alert for {}: {}", alert.getSymbol(), e.getMessage());
             }
         }
     }
@@ -85,10 +78,11 @@ public class AlertService {
         }
     }
 
-    private void processAutoAlerts(Alert alert, JsonNode quote, double currentPrice) {
-        if (quote.has("yearHigh") && quote.has("yearLow")) {
-            double yearHigh = quote.get("yearHigh").asDouble();
-            double yearLow = quote.get("yearLow").asDouble();
+    private void processAutoAlerts(Alert alert, Map<String, Object> quote, double currentPrice) {
+        // High/Low alerts only trigger if 52-week data is available in the mirror
+        if (quote.containsKey("yearHigh") && quote.containsKey("yearLow")) {
+            double yearHigh = Double.parseDouble(quote.get("yearHigh").toString());
+            double yearLow = Double.parseDouble(quote.get("yearLow").toString());
 
             if (currentPrice >= (yearHigh * 0.98)) {
                 trigger(alert, "Near 52W High", "🚀 " + alert.getSymbol() + " is soaring near its yearly high: " + yearHigh);
@@ -99,8 +93,9 @@ public class AlertService {
             }
         }
 
-        if (quote.has("changesPercentage")) {
-            double changePercent = quote.get("changesPercentage").asDouble();
+        // Percentage swing alerts (Data always available in the mirror)
+        if (quote.containsKey("changesPercentage")) {
+            double changePercent = Double.parseDouble(quote.get("changesPercentage").toString());
             if (changePercent >= 5.0) {
                 trigger(alert, "Major Price Swing", "🔥 " + alert.getSymbol() + " is rising fast! (+" + String.format("%.2f", changePercent) + "%)");
             } else if (changePercent <= -5.0) {
@@ -138,11 +133,14 @@ public class AlertService {
     }
 
     public AlertDTO addAlert(Alert alert) {
-        double currentPrice = fmpService.getStockPrice(alert.getSymbol());
+        // Validate stock exists in our mirrored universe
+        ApiResponse<Map<String, Object>> response = marketGateway.getLatestQuote(alert.getSymbol());
+        Map<String, Object> quote = response.getData();
 
-        if (currentPrice > 0) {
+        if (quote != null) {
             alert.setLastTriggeredAt(null);
             alertRepo.save(alert);
+            marketGateway.markAsPriority(alert.getSymbol());
 
             AlertDTO dto = new AlertDTO();
             dto.setMessage("Alert Set for " + alert.getSymbol() + " 🔔");
@@ -150,7 +148,7 @@ public class AlertService {
             dto.setStatus(200);
             return dto;
         } else {
-            throw new RuntimeException("Stock symbol not found or FMP API error.");
+            throw new RuntimeException("Stock symbol not found in our market universe or feed is syncing.");
         }
     }
 }

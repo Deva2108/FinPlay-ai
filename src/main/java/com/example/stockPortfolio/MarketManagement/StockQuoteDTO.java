@@ -15,4 +15,5 @@ public class StockQuoteDTO {
     private BigDecimal price;
     private BigDecimal changesPercentage;
     private String companyName;
+    private String market;
 }

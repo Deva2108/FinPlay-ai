@@ -23,7 +23,7 @@ public class Transaction {
     @NotBlank
     private String symbol;
     @NotNull
-    private int quantity;
+    private java.math.BigDecimal quantity;
     @DecimalMin(value = "0.01")
     private java.math.BigDecimal price;
     @NotNull
@@ -56,7 +56,7 @@ public class Transaction {
     }
 
     public enum TransactionType {
-        BUY, SELL
+        BUY, SELL, DEPOSIT, ADJUSTMENT
     }
 
     public enum PaymentStatus {

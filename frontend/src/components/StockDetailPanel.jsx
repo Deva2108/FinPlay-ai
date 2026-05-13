@@ -7,6 +7,7 @@ import { getChartData, explainStock } from '../services/api';
 import ChartComponent from './ChartComponent';
 import BuyModal from './GameMode/BuyModal';
 import InsightPanel from './InsightPanel';
+import DataBadge from './DataBadge';
 
 const contentVariants = {
   hidden: { opacity: 0, y: 20 },
@@ -37,6 +38,7 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [chartData, setChartData] = useState([]);
   const [loadingChart, setLoadingChart] = useState(false);
+  const [timeframe, setTimeframe] = useState('1M');
   
   const [insightPanelContent, setInsightPanelContent] = useState(null);
   const [insightScore, setInsightScore] = useState(() => parseInt(localStorage.getItem('insightScore') || '0', 10));
@@ -45,16 +47,17 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
   useEffect(() => {
     if (isOpen && stock) {
       setLoadingChart(true);
-      getChartData(stock.symbol).then(data => {
-        setChartData(data || []);
+      getChartData(stock.symbol, timeframe).then(res => {
+        // res.data is the map {symbol, currency, data: []}
+        setChartData(res?.data?.data || []);
         setLoadingChart(false);
       }).catch(() => setLoadingChart(false));
     }
-  }, [isOpen, stock]);
+  }, [isOpen, stock, timeframe]);
 
-  const handleConfirmBuy = (quantity) => {
-    const success = executeBuy(stock, quantity, "Purchased from detail view");
-    if (success) {
+  const handleConfirmBuy = async (quantity) => {
+    const result = await executeBuy(stock, quantity, "Purchased from detail view");
+    if (result.success) {
       setShowBuyModal(false);
       setIsPurchased(true);
       setTimeout(() => setIsPurchased(false), 3000);
@@ -66,7 +69,7 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
       title: "Syncing AI Mentor...",
       explanation: `Connecting to market logic for ${stock.symbol}...`,
       type: 'stock',
-      data: [{ label: 'Price', value: `$${point.value}` }]
+      data: [{ label: 'Price', value: formatPrice(point.value, stock.currency) }]
     });
 
     try {
@@ -74,7 +77,7 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
       const trend = prevPoint ? (point.value >= prevPoint.value ? 'UP' : 'DOWN') : 'SIDEWAYS';
       const change = prevPoint ? ((point.value - prevPoint.value) / prevPoint.value * 100).toFixed(2) : 0;
 
-      const aiRes = await explainStock({
+      const res = await explainStock({
         symbol: stock.symbol,
         trend,
         action: 'observing',
@@ -82,15 +85,17 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
         metrics: { price: point.value }
       });
 
+      const aiRes = res?.data;
+
       if (aiRes) {
         setInsightPanelContent({
           title: "Technical Insight",
           explanation: aiRes.explanation,
-          insight: aiRes.observation,
+          insight: aiRes.richInsight || aiRes.observation,
           type: 'stock',
           data: [
             { label: 'Time', value: point.formattedTime },
-            { label: 'Price', value: `$${point.value}`, color: 'text-white' },
+            { label: 'Price', value: formatPrice(point.value, stock.currency), color: 'text-white' },
             { label: 'Momentum', value: `${change}%`, color: Number(change) >= 0 ? 'text-emerald-500' : 'text-rose-500' }
           ],
           actions: [{ label: 'Got it!', primary: true }]
@@ -103,7 +108,13 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
         setShowScorePopup(pointsEarned);
         setTimeout(() => setShowScorePopup(false), 2000);
       }
-    } catch (err) {}
+    } catch (err) {
+      setInsightPanelContent(prev => ({
+        ...prev,
+        title: "Analysis Unavailable",
+        explanation: "AI Mentor is temporarily offline. Try again shortly."
+      }));
+    }
   };
 
   if (!stock) return null;
@@ -156,7 +167,10 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                 <motion.div custom={0} variants={contentVariants} initial="hidden" animate="visible" className="flex justify-between items-start">
                   <div className="flex items-center gap-4">
                     <div>
-                      <h2 className="text-4xl font-black text-white tracking-tighter leading-none">{stock.symbol}</h2>
+                      <h2 className="text-4xl font-black text-white tracking-tighter leading-none flex items-center gap-3">
+                        {stock.symbol}
+                        <DataBadge meta={stock.meta} />
+                      </h2>
                       <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-2">{stock.name}</p>
                     </div>
                   </div>
@@ -178,7 +192,12 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                   <div className="flex justify-between items-end relative z-10">
                     <div>
                       <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Current Price</p>
-                      <p className="text-5xl font-black text-white tracking-tighter">{formatPrice(stock.price, stock.market)}</p>
+                      <p className="text-5xl font-black text-white tracking-tighter">{formatPrice(stock.price, stock.currency || 'INR')}</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <InfoTooltip concept="volatility">
+                          <p className="text-[9px] font-bold text-blue-400/80 uppercase tracking-widest">Price movements reflect market sentiment</p>
+                        </InfoTooltip>
+                      </div>
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <div className={`flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-sm ${(stock.change || "").startsWith('+') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
@@ -200,13 +219,27 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                 <motion.div custom={2} variants={contentVariants} initial="hidden" animate="visible" className="space-y-4">
                    <div className="flex items-center justify-between px-2">
                       <SectionHeader icon={Activity} title="Interactive Performance" />
-                      <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest animate-pulse">Click point for AI insight</span>
+                      <div className="flex bg-slate-900/80 rounded-xl p-1 border border-white/5 gap-1">
+                        {['1D', '1W', '1M', '1Y', '5Y'].map((tf) => (
+                          <button
+                            key={tf}
+                            onClick={() => setTimeframe(tf)}
+                            className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all ${
+                              timeframe === tf 
+                              ? 'bg-blue-600 text-white shadow-lg' 
+                              : 'text-slate-500 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            {tf}
+                          </button>
+                        ))}
+                      </div>
                    </div>
                    <div className="bg-slate-900/60 rounded-3xl border border-white/5 p-6 h-[300px]">
                       {loadingChart ? (
-                        <div className="h-full flex items-center justify-center gap-3">
-                           <Zap size={16} className="text-blue-500 animate-spin" />
-                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Syncing Chart...</span>
+                        <div className="h-full flex flex-col items-center justify-center gap-3">
+                           <Zap size={24} className="text-blue-500 animate-spin" />
+                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest animate-pulse">Syncing {timeframe} Chart...</span>
                         </div>
                       ) : (
                         <ChartComponent 
@@ -217,15 +250,16 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                         />
                       )}
                    </div>
+                   <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest text-center animate-pulse">Click point for AI insight</p>
                 </motion.div>
 
                 {/* 4. Basic Metrics */}
                 <motion.div custom={3} variants={contentVariants} initial="hidden" animate="visible" className="space-y-6">
                   <SectionHeader icon={PieChart} title="Financial Health" />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <MetricCard label="Market Cap" value={stock.market === 'US' ? '$2.8T' : '₹18.5L Cr'} explanation="Total value of the company." />
+                    <MetricCard label="Market Cap" value={stock.currency === 'USD' ? '2.8T' : '18.5L Cr'} explanation="Total value of the company." />
                     <MetricCard label="P/E Ratio" value="28.4" explanation="Investor expectations score." />
-                    <MetricCard label="Revenue" value={stock.market === 'US' ? '$383B' : '₹9.2L Cr'} explanation="Total annual sales." />
+                    <MetricCard label="Revenue" value={stock.currency === 'USD' ? '383B' : '9.2L Cr'} explanation="Total annual sales." />
                     <MetricCard label="Dividend" value="0.52%" explanation="Cash back for shareholders." />
                   </div>
                 </motion.div>

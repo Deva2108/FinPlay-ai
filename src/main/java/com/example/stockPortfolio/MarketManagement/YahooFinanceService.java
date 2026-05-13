@@ -4,77 +4,80 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.*;
 
+/**
+ * High-reliability fallback service using public (unauthenticated) endpoints.
+ * Prioritizes Yahoo Finance Public API which has high limits and requires NO key.
+ */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class YahooFinanceService {
 
     private final RestTemplate restTemplate;
-    private final String BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart/";
+    private final SymbolNormalizer symbolNormalizer;
 
-    public List<Map<String, Object>> getHistoricalData(String symbol) {
+    private static final String YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/";
+
+    /**
+     * Fetches real-time quote using Yahoo Finance public chart endpoint.
+     * Works for US (^DJI, TSLA) and India (RELIANCE.NS, ^NSEI).
+     */
+    public Map<String, Object> fetchPublicQuote(String symbol) {
+        String normalized = symbolNormalizer.normalize(symbol);
+        if (normalized == null) return null;
+
+        String url = UriComponentsBuilder.fromHttpUrl(YAHOO_URL + normalized)
+                .queryParam("interval", "1d")
+                .queryParam("range", "1d")
+                .toUriString();
+
         try {
-            String url = UriComponentsBuilder.fromHttpUrl(BASE_URL + symbol.toUpperCase())
-                    .queryParam("interval", "15m")
-                    .queryParam("range", "1d")
-                    .toUriString();
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-            HttpEntity<String> entity = new HttpEntity<>(headers);
-
-            ResponseEntity<Map> responseEntity = restTemplate.exchange(url, HttpMethod.GET, entity, Map.class);
+            org.springframework.http.ResponseEntity<Map> responseEntity = restTemplate.getForEntity(url, Map.class);
+            
             Map<String, Object> response = responseEntity.getBody();
+            if (response == null || !response.containsKey("chart")) return null;
 
-            if (response != null && response.containsKey("chart")) {
-                Map<String, Object> chart = (Map<String, Object>) response.get("chart");
-                List<Map<String, Object>> resultList = (List<Map<String, Object>>) chart.get("result");
-                
-                if (resultList != null && !resultList.isEmpty()) {
-                    Map<String, Object> result = resultList.get(0);
-                    List<Number> timestamps = (List<Number>) result.get("timestamp");
-                    Map<String, Object> indicators = (Map<String, Object>) result.get("indicators");
-                    List<Map<String, Object>> quoteList = (List<Map<String, Object>>) indicators.get("quote");
-                    List<Number> closePrices = (List<Number>) quoteList.get(0).get("close");
+            Map<String, Object> chart = (Map<String, Object>) response.get("chart");
+            List<Map<String, Object>> result = (List<Map<String, Object>>) chart.get("result");
+            if (result == null || result.isEmpty()) return null;
 
-                    List<Map<String, Object>> formattedData = new ArrayList<>();
-                    
-                    if (timestamps != null && closePrices != null) {
-                        int size = Math.min(timestamps.size(), closePrices.size());
-                        for (int i = 0; i < size; i++) {
-                            Number close = closePrices.get(i);
-                            Number ts = timestamps.get(i);
-                            
-                            // Filter null values and invalid points
-                            if (close != null && ts != null) {
-                                Map<String, Object> point = new HashMap<>();
-                                // STRICT CONTRACT: time, value
-                                point.put("time", ts.longValue());
-                                point.put("value", close.doubleValue());
-                                formattedData.add(point);
-                            }
-                        }
-                        
-                        if (!formattedData.isEmpty()) {
-                            log.info("Successfully fetched {} real data points for {}", formattedData.size(), symbol);
-                            return formattedData;
-                        }
-                    }
-                }
+            Map<String, Object> meta = (Map<String, Object>) result.get(0).get("meta");
+            
+            Double price = parseDouble(meta.get("regularMarketPrice"));
+            Double prevClose = parseDouble(meta.get("previousClose"));
+            
+            if (price == null) return null;
+
+            double changePct = 0.0;
+            if (prevClose != null && prevClose != 0) {
+                changePct = ((price - prevClose) / prevClose) * 100.0;
             }
-            throw new RuntimeException("No real data found for " + symbol);
+
+            Map<String, Object> quote = new HashMap<>();
+            quote.put("symbol", normalized);
+            quote.put("price", Math.round(price * 100.0) / 100.0);
+            quote.put("changesPercentage", Math.round(changePct * 100.0) / 100.0);
+            quote.put("source", "yahoo_public");
+            
+            log.debug("Successfully fetched public quote for {} from Yahoo: {}", normalized, price);
+            return quote;
+
         } catch (Exception e) {
-            log.error("Yahoo Finance Error for {}: {}", symbol, e.getMessage());
-            // NO FAKE FALLBACK
-            throw new RuntimeException("Yahoo Finance API unavailable: " + e.getMessage());
+            log.warn("Yahoo Public API failed for {}: {}", normalized, e.getMessage());
+            return null;
+        }
+    }
+
+    private Double parseDouble(Object v) {
+        if (v == null) return null;
+        try {
+            return Double.parseDouble(v.toString());
+        } catch (Exception e) {
+            return null;
         }
     }
 }

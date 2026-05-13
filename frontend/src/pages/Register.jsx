@@ -25,8 +25,8 @@ export default function Register() {
     setError(null);
     try {
       const res = await registerUser({ name, email, password });
-      if (res) {
-        navigate('/login');
+      if (res?.success) {
+        navigate('/onboarding');
       } else {
         setError('Registration failed.');
       }
@@ -36,9 +36,6 @@ export default function Register() {
         err.response?.data ||
         err.message ||
         "Registration failed";
-
-      console.log("REGISTER FINAL ERROR:", message);
-      console.log("FULL ERROR:", err);
 
       setError(message);
     } finally {

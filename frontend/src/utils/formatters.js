@@ -1,10 +1,14 @@
-export const formatPrice = (price, market) => {
-  const symbol = market === 'US' ? '$' : '₹';
+export const formatPrice = (price, currency = 'INR') => {
   const numericPrice = typeof price === 'string' ? parseFloat(price.replace(/,/g, '')) : price;
   
   if (isNaN(numericPrice) || numericPrice === null || numericPrice === undefined) {
-    return `${symbol}0.00`;
+    return '---';
   }
 
-  return `${symbol}${numericPrice.toFixed(2)}`;
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: currency || 'INR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numericPrice);
 };

@@ -3,12 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Info, TrendingUp, TrendingDown, Lightbulb, Target, Activity, Briefcase, Zap, Loader2 } from 'lucide-react';
 import MiniChart from './MiniChart';
 import InfoTooltip from './InfoTooltip';
-import { getIndexInsight } from '../services/api';
+import { getIndexInsight, getChartData } from '../services/api';
 import { useMarket } from '../context/MarketContext';
 
 export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGame }) {
   const { marketMode } = useMarket();
   const [timeframe, setTimeframe] = useState('1D');
+  const [chartData, setChartData] = useState([]);
+  const [loadingChart, setLoadingChart] = useState(false);
   const [userDecision, setUserDecision] = useState(null);
   const [aiInsight, setAiInsight] = useState(null);
   const [loadingInsight, setLoadingInsight] = useState(false);
@@ -19,6 +21,7 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
       document.body.style.overflow = 'hidden';
       setUserDecision(null); // Reset choice on open
       fetchAiInsight();
+      fetchChart();
     } else {
       document.body.style.overflow = 'auto';
     }
@@ -26,6 +29,13 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
       document.body.style.overflow = 'auto';
     };
   }, [isOpen, indexData]);
+
+  // Refetch chart when timeframe changes
+  useEffect(() => {
+    if (isOpen && indexData) {
+      fetchChart();
+    }
+  }, [timeframe]);
 
   const fetchAiInsight = async () => {
     if (!indexData) return;
@@ -37,6 +47,19 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
       console.error("AI Insight Error", err);
     } finally {
       setLoadingInsight(false);
+    }
+  };
+
+  const fetchChart = async () => {
+    if (!indexData) return;
+    setLoadingChart(true);
+    try {
+      const res = await getChartData(indexData.symbol, timeframe);
+      setChartData(res?.data?.chartData || []);
+    } catch (err) {
+      setChartData([]);
+    } finally {
+      setLoadingChart(false);
     }
   };
 
@@ -113,9 +136,18 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
                     ))}
                   </div>
                 </div>
-                <div className="bg-slate-950/50 rounded-3xl border border-white/5 p-4 relative overflow-hidden group/chart">
-                   <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover/chart:opacity-100 transition-opacity pointer-events-none" />
-                   <MiniChart timeframe={timeframe} color={isPositive ? '#10b981' : '#f43f5e'} />
+                <div className="bg-slate-950/50 rounded-3xl border border-white/5 p-4 relative overflow-hidden group/chart h-48 flex items-center justify-center">
+                   {loadingChart ? (
+                     <div className="flex flex-col items-center gap-2">
+                        <Loader2 size={16} className="animate-spin text-blue-500" />
+                        <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest animate-pulse">Syncing Mirror...</span>
+                     </div>
+                   ) : (
+                     <>
+                       <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover/chart:opacity-100 transition-opacity pointer-events-none" />
+                       <MiniChart timeframe={timeframe} color={isPositive ? '#10b981' : '#f43f5e'} data={chartData} />
+                     </>
+                   )}
                 </div>
               </section>
 
@@ -139,15 +171,58 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
                       <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest animate-pulse">Syncing Macro Intelligence...</p>
                     </div>
                   ) : (
-                    <>
-                      <p className="text-sm text-slate-300 font-medium leading-relaxed italic">
-                        "{aiInsight?.explanation || "This index represents the pulse of the major sectors. When it moves, the entire market shifts its stance."}"
-                      </p>
-                      <div className="text-[11px] font-bold p-4 rounded-2xl bg-blue-500/10 text-blue-400 flex items-start gap-3 border border-blue-500/20">
-                        <Lightbulb size={16} className="shrink-0 mt-0.5" />
-                        <p>{aiInsight?.observation || (isPositive ? "Current strength suggests high institutional confidence. Small pullbacks could be healthy." : "Heightened volatility observed. This is where disciplined traders separate from the impulsive.")}</p>
-                      </div>
-                    </>
+                    <div className="space-y-4">
+                      {aiInsight?.richInsight ? (
+                        <>
+                          <div className="space-y-2">
+                             <p className="text-sm text-white font-black leading-relaxed">
+                               {aiInsight.richInsight?.whatHappened || 'Index momentum is currently being analyzed by our AI mentor.'}
+                             </p>
+                             <p className="text-xs text-slate-400 font-bold">
+                               {aiInsight.richInsight?.whyItMatters || 'Macro movements reflect the collective sentiment of institutional participants.'}
+                             </p>
+                          </div>
+
+                          {/* IMPACTS */}
+                          <div className="grid grid-cols-2 gap-3">
+                             <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
+                               <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Global</p>
+                               <p className="text-[10px] font-bold text-white leading-tight">{aiInsight.richInsight?.globalImpact || 'Analyzing global liquidity flows.'}</p>
+                             </div>
+                             <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
+                               <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Domestic</p>
+                               <p className="text-[10px] font-bold text-white leading-tight">{aiInsight.richInsight?.indiaImpact || 'Assessing local market resilience.'}</p>
+                             </div>
+                          </div>
+                          
+                          <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 italic">
+                             <p className="text-xs text-blue-100/90 leading-relaxed">
+                                "Analogy: {aiInsight.richInsight?.analogy || 'Like the weather, market indices show the broad climate, while individual stocks are the local conditions.'}"
+                             </p>
+                          </div>
+
+                          <div className="space-y-2 pt-2">
+                             <p className="text-[11px] font-bold text-slate-300">
+                                <Zap size={10} className="inline mr-2 text-blue-400" />
+                                {aiInsight.richInsight?.whatYouCanLearn || 'Focus on how the index reacts to major psychological support and resistance levels.'}
+                             </p>
+                             <p className="text-[10px] text-purple-400 font-black italic">
+                                {aiInsight.richInsight?.investorPerspective || '"In the short run, the market is a voting machine but in the long run, it is a weighing machine." — Benjamin Graham'}
+                             </p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-slate-300 font-medium leading-relaxed italic">
+                            "{aiInsight?.explanation || "This index represents the pulse of the major sectors. When it moves, the entire market shifts its stance."}"
+                          </p>
+                          <div className="text-[11px] font-bold p-4 rounded-2xl bg-blue-500/10 text-blue-400 flex items-start gap-3 border border-blue-500/20">
+                            <Lightbulb size={16} className="shrink-0 mt-0.5" />
+                            <p>{aiInsight?.observation || (isPositive ? "Current strength suggests high institutional confidence. Small pullbacks could be healthy." : "Heightened volatility observed. This is where disciplined traders separate from the impulsive.")}</p>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
               </section>

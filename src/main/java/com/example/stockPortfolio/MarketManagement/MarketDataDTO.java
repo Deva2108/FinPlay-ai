@@ -16,4 +16,5 @@ public class MarketDataDTO {
     private BigDecimal changesPercentage;
     private String sector;
     private String marketCap;
+    private String market;
 }

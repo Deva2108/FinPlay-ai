@@ -77,7 +77,13 @@ public class DecisionService {
         }
 
         Map<String, String> response = new HashMap<>();
-        response.put("outcome", isPositive && action.equalsIgnoreCase("BUY") ? "good" : !isPositive && action.equalsIgnoreCase("BUY") ? "risky" : "neutral");
+        String outcome;
+        if (action.equalsIgnoreCase("BUY")) {
+            outcome = isPositive ? "good" : "risky";
+        } else {
+            outcome = "neutral";
+        }
+        response.put("outcome", outcome);
         response.put("aiMessage", aiResponse);
         response.put("behaviorHighlight", behaviorHighlight);
         
@@ -95,6 +101,8 @@ public class DecisionService {
                 .map(DecisionDTO::fromEntity)
                 .collect(Collectors.toList());
     }
+
+    private final com.example.stockPortfolio.MarketManagement.MarketAnalysisService marketAnalysisService;
 
     public Map<String, Object> getStats() {
         Long userId = getLoggedInUser().getUserId();
@@ -136,20 +144,14 @@ public class DecisionService {
         stats.put("lastAction", lastAction);
         stats.put("dominantPattern", pattern);
         
-        // revenueBySector (Equivalent to revenueByGarmentType for a Stock App)
+        // revenueBySector (Dynamic mapping from DB)
         List<com.example.stockPortfolio.HoldingsManagement.Transaction> txns = transactionRepo.findByUserId(userId);
         Map<String, Double> revenueBySector = new HashMap<>();
         
         txns.stream().filter(t -> t.getType() == com.example.stockPortfolio.HoldingsManagement.Transaction.TransactionType.SELL)
             .forEach(t -> {
-                String sector = "Other";
-                String sym = t.getSymbol().toUpperCase();
-                if (sym.matches(".*(AAPL|MSFT|NVDA|GOOGL|META|AMD|INTC|CRM|AVGO).*")) sector = "Tech";
-                else if (sym.matches(".*(JPM|V|MA|BAC|HDFC|ICICI).*")) sector = "Finance";
-                else if (sym.matches(".*(TSLA|F|GM|TATA MOTORS).*")) sector = "Automotive";
-                else if (sym.matches(".*(XOM|CVX|SLB|RELIANCE).*")) sector = "Energy";
-                
-                double amount = t.getPrice().multiply(java.math.BigDecimal.valueOf(t.getQuantity())).doubleValue();
+                String sector = marketAnalysisService.getSectorForSymbol(t.getSymbol());
+                double amount = t.getPrice().multiply(t.getQuantity()).doubleValue();
                 revenueBySector.put(sector, revenueBySector.getOrDefault(sector, 0.0) + amount);
             });
             
@@ -165,7 +167,7 @@ public class DecisionService {
         if (userDecisions.isEmpty()) {
             Map<String, String> response = new HashMap<>();
             response.put("behaviorType", "neutral");
-            response.put("insightMessage", "Start making decisions in the Arena to unlock behavioral insights.");
+            response.put("insightMessage", "Start making decisions in the market to unlock behavioral insights.");
             return response;
         }
 

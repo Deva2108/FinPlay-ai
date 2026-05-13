@@ -19,7 +19,7 @@ export default function LiveContextPanel({ stock, gameStep, onShowInsight }) {
         symbol: stock.symbol,
         situation: stock.situation
       });
-      setAiExplanation(result.explanation);
+      setAiExplanation(result.richInsight || result.explanation);
     } catch (err) {
       console.error("AI Explanation Error:", err);
       setAiExplanation("This insight requires an active session. Please log in to unlock AI analysis.");
@@ -62,7 +62,7 @@ export default function LiveContextPanel({ stock, gameStep, onShowInsight }) {
                 {stock.isPositive ? <TrendingUp size={18} className="text-emerald-500" /> : <TrendingDown size={18} className="text-rose-500" />}
               </div>
               <div>
-                <p className="text-sm font-black text-white">{stock.market === 'IN' ? 'NSE Sector Index' : 'S&P 500 Sector'}</p>
+                <p className="text-sm font-black text-white">{stock.currency === 'INR' ? 'NSE Sector Index' : 'S&P 500 Sector'}</p>
                 <p className={`text-xs font-bold ${stock.isPositive ? 'text-emerald-500' : 'text-rose-500'}`}>
                   {stock.isPositive ? '+1.8%' : '-0.9%'} Today
                 </p>
@@ -120,9 +120,16 @@ export default function LiveContextPanel({ stock, gameStep, onShowInsight }) {
                    <Bot size={12} className="text-indigo-400" />
                    <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">AI Insight</span>
                 </div>
-                <p className="text-xs text-indigo-100 font-medium leading-relaxed">
-                  {aiExplanation}
-                </p>
+                <div className="text-xs text-indigo-100 font-medium leading-relaxed">
+                  {typeof aiExplanation === 'string' ? (
+                    aiExplanation || 'Analyzing stock-specific sentiment...'
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="font-bold">{aiExplanation?.whatHappened || 'Sentiment is stabilizing.'}</p>
+                      <p className="opacity-70 text-[10px] italic">"Analogy: {aiExplanation?.analogy || 'Individual stocks act as components of the broader market trend.'}"</p>
+                    </div>
+                  )}
+                </div>
                 <button 
                   onClick={() => setAiExplanation(null)}
                   className="mt-3 text-[9px] font-black text-indigo-400/60 uppercase tracking-widest hover:text-indigo-400 transition-colors"

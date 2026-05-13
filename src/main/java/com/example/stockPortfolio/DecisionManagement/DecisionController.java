@@ -14,7 +14,9 @@ import java.util.stream.Collectors;
 public class DecisionController {
 
     private final DecisionService decisionService;
-    private final com.example.stockPortfolio.AiManagement.service.GeminiService geminiService;
+    private final com.example.stockPortfolio.MarketManagement.MarketGateway marketGateway;
+    private final com.example.stockPortfolio.UserManagement.UserService userService;
+    private final com.example.stockPortfolio.AiManagement.service.AiService aiService;
 
     @PostMapping
     public ResponseEntity<ApiResponse<DecisionDTO>> saveDecision(@RequestBody DecisionDTO request) {
@@ -44,17 +46,20 @@ public class DecisionController {
 
     @GetMapping("/archetype")
     public ResponseEntity<ApiResponse<ArchetypeResponseDTO>> getArchetype() {
-        List<DecisionDTO> decisions = decisionService.getRecentDecisions();
+        String email = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName();
+        com.example.stockPortfolio.UserManagement.User user = userService.getUserByEmail(email);
         
-        List<Map<String, Object>> rawDecisions = decisions.stream().map(d -> {
-            Map<String, Object> map = new HashMap<>();
-            map.put("symbol", d.getSymbol());
-            map.put("action", d.getAction());
-            map.put("price", d.getPrice());
-            return map;
-        }).collect(Collectors.toList());
-
-        ArchetypeResponseDTO archetype = geminiService.getBehavioralIdentity(rawDecisions);
-        return ResponseEntity.ok(ApiResponse.ok(archetype, "Behavioral archetype generated"));
+        // READ PRECOMPUTED FROM GATEWAY
+        ArchetypeResponseDTO archetype = (ArchetypeResponseDTO) marketGateway.getUserInsight(user.getUserId(), "archetype");
+        
+        if (archetype == null) {
+            ArchetypeResponseDTO fallback = ArchetypeResponseDTO.builder()
+                    .title("The Observer")
+                    .trait("Analyzing patterns before defining a style.")
+                    .build();
+            return ResponseEntity.ok(ApiResponse.syncing(fallback, "Your behavioral profile is being analyzed...", "fallback"));
+        }
+        
+        return ResponseEntity.ok(ApiResponse.ok(archetype, "Behavioral archetype fetched from cache", "cache"));
     }
 }

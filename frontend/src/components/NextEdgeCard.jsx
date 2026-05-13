@@ -1,13 +1,14 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Target, Zap, Lightbulb, ChevronRight, Info } from 'lucide-react';
-import { useBehavior } from '../context/BehaviorContext';
 import { useTrading } from '../context/TradingContext';
+import { useMarket } from '../context/MarketContext';
 import { getLearningInsight } from '../utils/learningEngine';
+import { formatPrice } from '../utils/formatters';
 
 const NextEdgeCard = () => {
-  const { decisions = [], missedOpportunities = [] } = useBehavior();
-  const { portfolio = [] } = useTrading();
+  const { decisions = [], missedOpportunities = [], portfolio = [] } = useTrading();
+  const { marketCode } = useMarket();
 
   const adaptiveInsight = useMemo(() => {
     return getLearningInsight({
@@ -41,40 +42,43 @@ const NextEdgeCard = () => {
     return { total, skipRate, buyRate, missedValue: Math.round(missedValue), state };
   }, [decisions, missedOpportunities]);
 
-  const content = {
-    cautious: {
-      tag: adaptiveInsight?.topic || "Cautious Player",
-      insight: adaptiveInsight?.message || `You are playing too safe. You skipped ${Math.round(stats?.skipRate * 100 || 0)}% of setups recently.`,
-      impact: stats?.missedValue > 0 ? `+₹${stats.missedValue}` : "+₹180",
-      suggestion: adaptiveInsight?.explanation || "Take 1 controlled entry to build conviction.",
-      color: "from-indigo-600/20 to-purple-600/20",
-      border: "border-indigo-500/30"
-    },
-    aggressive: {
-      tag: adaptiveInsight?.topic || "Momentum Chaser",
-      insight: adaptiveInsight?.message || `High entry speed detected. You are buying ${Math.round(stats?.buyRate * 100 || 0)}% of setups.`,
-      impact: "-₹450",
-      suggestion: adaptiveInsight?.explanation || "Wait for a 2% pullback before the next entry.",
-      color: "from-orange-600/20 to-rose-600/20",
-      border: "border-orange-500/30"
-    },
-    balanced: {
-      tag: adaptiveInsight?.topic || "Balanced Thinker",
-      insight: adaptiveInsight?.message || "Strong discipline. Your risk-to-reward ratio is improving.",
-      impact: stats?.missedValue > 0 ? `+₹${stats.missedValue}` : "+₹320",
-      suggestion: adaptiveInsight?.explanation || "Explore mid-cap sectors to diversify your edge.",
-      color: "from-emerald-600/20 to-teal-600/20",
-      border: "border-emerald-500/30"
-    },
-    empty: {
-      tag: "Beginner",
-      insight: "The Arena is waiting for your first decision.",
-      impact: "₹0",
-      suggestion: "Make 3 decisions in the Arena to unlock your edge.",
-      color: "from-slate-600/20 to-slate-800/20",
-      border: "border-slate-500/30"
-    }
-  };
+  const content = useMemo(() => {
+    const currency = marketCode === 'IN' ? 'INR' : 'INR';
+    return {
+      cautious: {
+        tag: adaptiveInsight?.topic || "Cautious Player",
+        insight: adaptiveInsight?.message || `You are playing too safe. You skipped ${Math.round(stats?.skipRate * 100 || 0)}% of setups recently.`,
+        impact: stats?.missedValue > 0 ? `+${formatPrice(stats.missedValue, currency)}` : `+${formatPrice(180, currency)}`,
+        suggestion: adaptiveInsight?.explanation || "Take 1 controlled entry to build conviction.",
+        color: "from-indigo-600/20 to-purple-600/20",
+        border: "border-indigo-500/30"
+      },
+      aggressive: {
+        tag: adaptiveInsight?.topic || "Momentum Chaser",
+        insight: adaptiveInsight?.message || `High entry speed detected. You are buying ${Math.round(stats?.buyRate * 100 || 0)}% of setups.`,
+        impact: `-${formatPrice(450, currency)}`,
+        suggestion: adaptiveInsight?.explanation || "Wait for a 2% pullback before the next entry.",
+        color: "from-orange-600/20 to-rose-600/20",
+        border: "border-orange-500/30"
+      },
+      balanced: {
+        tag: adaptiveInsight?.topic || "Balanced Thinker",
+        insight: adaptiveInsight?.message || "Strong discipline. Your risk-to-reward ratio is improving.",
+        impact: stats?.missedValue > 0 ? `+${formatPrice(stats.missedValue, currency)}` : `+${formatPrice(320, currency)}`,
+        suggestion: adaptiveInsight?.explanation || "Explore mid-cap sectors to diversify your edge.",
+        color: "from-emerald-600/20 to-teal-600/20",
+        border: "border-emerald-500/30"
+      },
+      empty: {
+        tag: "Beginner",
+        insight: "The Arena is waiting for your first decision.",
+        impact: formatPrice(0, currency),
+        suggestion: "Make 3 decisions in the Arena to unlock your edge.",
+        color: "from-slate-600/20 to-slate-800/20",
+        border: "border-slate-500/30"
+      }
+    };
+  }, [stats, adaptiveInsight, marketCode]);
 
   const active = stats ? content[stats.state] : content.empty;
 

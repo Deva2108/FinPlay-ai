@@ -13,6 +13,7 @@ public class PortfolioDTO {
     private Long portfolioId;
     private Long userId;
     private String portfolioName;
+    private String currency; // "INR"
     private java.math.BigDecimal balance;
     private java.math.BigDecimal initialBalance;
 

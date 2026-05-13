@@ -1,4 +1,4 @@
-import React, { Component, Suspense, ReactNode } from 'react';
+import React, { Component, Suspense, lazy, ReactNode, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AlertTriangle } from 'lucide-react';
 
@@ -9,20 +9,25 @@ const LoadingScreen = () => (
   </div>
 );
 
-import Dashboard from './pages/Dashboard';
-import FinPlayArena from './components/FinPlayArena';
-import Portfolio from './pages/Portfolio';
-import LiveMarket from './pages/LiveMarket';
-import StockDetails from './pages/StockDetails';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Onboarding from './pages/Onboarding';
-import SimpleDashboard from './pages/SimpleDashboard';
+// Lazy-loaded page components for code-splitting
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Insights = lazy(() => import('./pages/Insights'));
+const FinPlayArena = lazy(() => import('./components/FinPlayArena'));
+const Portfolio = lazy(() => import('./pages/Portfolio'));
+const LiveMarket = lazy(() => import('./pages/LiveMarket'));
+const StockDetails = lazy(() => import('./pages/StockDetails'));
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const Onboarding = lazy(() => import('./pages/Onboarding'));
+const Decisions = lazy(() => import('./pages/Decisions'));
+const Vault = lazy(() => import('./pages/Vault'));
+const SimpleDashboard = lazy(() => import('./pages/SimpleDashboard'));
+const Admin = lazy(() => import('./pages/Admin'));
+
 import Layout from './components/Layout';
 import { StockPanelProvider } from './context/StockPanelContext';
 import { TradingProvider } from './context/TradingContext';
 import { MarketProvider } from './context/MarketContext';
-import { BehaviorProvider } from './context/BehaviorContext';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -62,7 +67,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
                 <h2 className="text-2xl font-black text-white uppercase tracking-tight">Sync Interrupted</h2>
                 <p className="text-slate-400 text-sm leading-relaxed">The system encountered a logic gap. Don't worry, your assets are safe.</p>
               </div>
-              <button 
+              <button
                 onClick={() => window.location.href = '/'}
                 className="w-full py-4 bg-white text-slate-950 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all shadow-xl shadow-white/5"
               >
@@ -77,48 +82,104 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
+function PrivateRoute({ children }: { children: ReactNode }) {
+  const token = localStorage.getItem('token');
+  return token ? <>{children}</> : <Navigate to="/login" replace />;
+}
+
+/**
+ * Admin gate. Reads cached `finplay_user.admin` first to avoid a network round
+ * trip; falls back to /api/auth/me on first render so a page reload still works.
+ * Server is the real authority — this just avoids a 403 flash.
+ */
+function AdminRoute({ children }: { children: ReactNode }) {
+  const token = localStorage.getItem('token');
+  const cached = (() => {
+    try { return JSON.parse(localStorage.getItem('finplay_user') || 'null'); }
+    catch { return null; }
+  })();
+
+  // Hooks must be unconditional — read state every render.
+  const [state, setState] = useState<'pending' | 'admin' | 'denied'>(
+    !token ? 'denied' : cached?.admin ? 'admin' : 'pending'
+  );
+
+  useEffect(() => {
+    if (state !== 'pending') return;
+    let cancelled = false;
+    import('./services/api').then(({ fetchMe }) => fetchMe())
+      .then(me => {
+        if (cancelled) return;
+        if (me?.admin) {
+          localStorage.setItem('finplay_user', JSON.stringify(me));
+          setState('admin');
+        } else {
+          setState('denied');
+        }
+      })
+      .catch(() => { if (!cancelled) setState('denied'); });
+    return () => { cancelled = true; };
+  }, [state]);
+
+  if (!token)               return <Navigate to="/login" replace />;
+  if (state === 'pending')  return <LoadingScreen />;
+  if (state === 'admin')    return <>{children}</>;
+  return <Navigate to="/" replace />;
+}
+
 export default function App() {
   const isFirstTime = !localStorage.getItem('finplay_arena_done');
 
   return (
     <ErrorBoundary>
       <MarketProvider>
-        <BehaviorProvider>
-          <TradingProvider>
-            <StockPanelProvider>
-              <BrowserRouter>
+        <TradingProvider>
+          <StockPanelProvider>
+              <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                 <Suspense fallback={<LoadingScreen />}>
                   <Routes>
                     {/* Entry Logic */}
-                    <Route path="/" element={isFirstTime ? <Navigate to="/onboarding" replace /> : <Layout><Dashboard /></Layout>} />
-                    
-                    {/* Start-to-Market Flow */}
-                    <Route path="/onboarding" element={<Onboarding />} />
-                    
-                    {/* Market Experience (Arena) with Layout */}
-                    <Route 
-                      path="/arena" 
-                      element={
+                    <Route path="/" element={
+                      <PrivateRoute>
+                        {isFirstTime
+                          ? <Navigate to="/onboarding" replace />
+                          : <Layout><Dashboard /></Layout>
+                        }
+                      </PrivateRoute>
+                    } />
+
+                    {/* Onboarding (requires login — users register then land here) */}
+                    <Route path="/onboarding" element={
+                      <PrivateRoute><Onboarding /></PrivateRoute>
+                    } />
+
+                    {/* Protected Market Experience */}
+                    <Route path="/arena" element={
+                      <PrivateRoute>
                         <Layout>
-                          <FinPlayArena 
-                            onDecisionMade={() => {}} 
-                            onShowInsight={() => {}} 
-                            context={{}} 
+                          <FinPlayArena
+                            onDecisionMade={() => {}}
+                            onShowInsight={() => {}}
+                            context=""
                           />
                         </Layout>
-                      } 
-                    />
-                    <Route path="/market" element={<Layout><LiveMarket /></Layout>} />
-                    <Route path="/portfolio" element={<Layout><Portfolio /></Layout>} />
-                    <Route path="/stock/:symbol" element={<Layout><StockDetails /></Layout>} />
-                    
-                    {/* Dashboard Redirect */}
-                    <Route path="/dashboard" element={<Layout><Dashboard /></Layout>} />
-                    
-                    {/* Auth & System */}
+                      </PrivateRoute>
+                    } />
+                    <Route path="/market" element={<PrivateRoute><Layout><LiveMarket /></Layout></PrivateRoute>} />
+                    <Route path="/portfolio" element={<PrivateRoute><Layout><Portfolio /></Layout></PrivateRoute>} />
+                    <Route path="/vault" element={<PrivateRoute><Layout><Vault /></Layout></PrivateRoute>} />
+                    <Route path="/history" element={<PrivateRoute><Layout><Decisions /></Layout></PrivateRoute>} />
+                    <Route path="/insights" element={<PrivateRoute><Layout><Insights /></Layout></PrivateRoute>} />
+                    <Route path="/stock/:symbol" element={<PrivateRoute><Layout><StockDetails /></Layout></PrivateRoute>} />
+                    <Route path="/dashboard" element={<PrivateRoute><Layout><Dashboard /></Layout></PrivateRoute>} />
+
+                    {/* Admin console — gated client + server side */}
+                    <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
+
+                    {/* Auth (public) */}
                     <Route path="/login" element={<Login />} />
                     <Route path="/register" element={<Register />} />
-                    
+
                     {/* Fallback */}
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
@@ -126,7 +187,6 @@ export default function App() {
               </BrowserRouter>
             </StockPanelProvider>
           </TradingProvider>
-        </BehaviorProvider>
       </MarketProvider>
     </ErrorBoundary>
   );

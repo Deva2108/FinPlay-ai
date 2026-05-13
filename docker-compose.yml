@@ -1,51 +1,149 @@
+# =============================================================================
+# FinPlay — full local stack (cross-platform: Mac / Windows / Linux)
+#
+# Run on Windows (PowerShell or CMD):
+#     docker compose up --build
+# Run on Mac / Linux:
+#     docker compose up --build
+#
+# All services share a private network. Postgres data persists in a named volume.
+# Frontend waits for backend health (not just container start).
+# =============================================================================
+
+name: finplay
+
 services:
+  # ---------------------------------------------------------------------------
   db:
     image: postgres:15-alpine
-    container_name: postgres-db
-    restart: always
+    container_name: finplay-db
+    restart: unless-stopped
     environment:
-      - POSTGRES_DB=stocksdb
-      - POSTGRES_USER=${DB_USERNAME}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-stocksdb}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password123}
     ports:
+      # Host:container — exposed on 5444 to avoid clashing with native installs.
       - "5444:5432"
+    volumes:
+      - finplay-db-data:/var/lib/postgresql/data
+    networks:
+      - finplay-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d stocksdb"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${POSTGRES_DB:-stocksdb}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
 
+  # ---------------------------------------------------------------------------
   redis:
-    image: redis:alpine
-    container_name: redis-cache
-    restart: always
+    image: redis:7-alpine
+    container_name: finplay-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
       - "6379:6379"
+    volumes:
+      - finplay-redis-data:/data
+    networks:
+      - finplay-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
+      timeout: 3s
       retries: 5
 
-  app:
-    build: .
-    container_name: spring-app
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: finplay-backend:latest
+    container_name: finplay-backend
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
-      - DB_URL=jdbc:postgresql://db:5432/stocksdb
-      - DB_USERNAME=${DB_USERNAME}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - JWT_SECRET=${JWT_SECRET}
-      - JWT_EXPIRATION=${JWT_EXPIRATION}
-      - STOCK_API_KEY=${STOCK_API_KEY}
-      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
-      - NEWS_API_KEY=${NEWS_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # Profile
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+
+      # Database — points at the `db` service inside the compose network.
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-stocksdb}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-password123}
+
+      # Redis — points at the `redis` service inside the compose network.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+      # Auth
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+
+      # Market data APIs
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY}
+      NEWS_API_KEY:    ${NEWS_API_KEY}
+      ALPHA_VANTAGE_KEY: ${ALPHA_VANTAGE_KEY:-}
+
+      # AI providers
+      GROQ_API_KEY:   ${GROQ_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+      # Content
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+
+      # CORS — frontend container served on http://localhost:3000.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+
+      # Admin allowlist (comma-separated emails granted ROLE_ADMIN at login).
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+
+      # JVM tuning is also defined in the Dockerfile; override here if needed.
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - finplay-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # When users browse to http://localhost:3000, the JS in their browser
+        # calls http://localhost:8080 (backend container, port-mapped to host).
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+    image: finplay-frontend:latest
+    container_name: finplay-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - finplay-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+# =============================================================================
+volumes:
+  finplay-db-data:
+  finplay-redis-data:
+
+networks:
+  finplay-net:
+    driver: bridge

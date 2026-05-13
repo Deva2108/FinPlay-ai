@@ -8,11 +8,10 @@ import {
   BrainCircuit, LineChart, HelpCircle, Sparkles, Loader2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { getUserPortfolios, getPortfolioMentorAdvice, getArchetype } from '../services/api';
+import { getPortfolioMentorAdvice, getArchetype } from '../services/api';
 import { formatPrice } from '../utils/formatters';
 import { useTrading } from '../context/TradingContext';
 import { useStockPanel } from '../context/StockPanelContext';
-import { useBehavior } from '../context/BehaviorContext';
 import PortfolioSuggestionCard from '../components/PortfolioSuggestionCard';
 import InsightPanel from '../components/InsightPanel';
 import NextEdgeCard from '../components/NextEdgeCard';
@@ -35,8 +34,19 @@ const MarketInsights = [
 ];
 
 export default function Portfolio() {
-  const { balance, portfolio: allPortfolio, executeSell, lastAction, decisions: allDecisions, gameImpact, loading, refreshData } = useTrading();
-  const { decisions: behaviorDecisions, missedOpportunities: behaviorMissed } = useBehavior();
+  const { 
+    balance, 
+    portfolio: allPortfolio, 
+    executeSell, 
+    lastAction, 
+    decisions: behaviorDecisions, 
+    missedOpportunities: behaviorMissed,
+    gameImpact, 
+    loading, 
+    refreshData,
+    activePortfolioId
+  } = useTrading();
+  
   const { openStockPanel } = useStockPanel();
   const { marketCode } = useMarket();
   const navigate = useNavigate();
@@ -46,20 +56,16 @@ export default function Portfolio() {
   }, [refreshData, marketCode]);
 
   const portfolio = useMemo(() => (allPortfolio || []).filter(p => p && p.market === (marketCode === 'IN' ? 'INDIA' : marketCode)), [allPortfolio, marketCode]);
+  const decisions = useMemo(() => (behaviorDecisions || []).filter(d => d && d.stock && (d.stock.market === marketCode || (marketCode === 'IN' && d.stock.currency === 'INR') || (marketCode === 'US' && d.stock.currency === 'INR'))), [behaviorDecisions, marketCode]);
 
-  const decisions = useMemo(() => (allDecisions || []).filter(d => d && d.stock && d.stock.market === marketCode), [allDecisions, marketCode]);
-
-  const [priceModifiers, setPriceModifiers] = useState({});
   const [lastTotalValue, setLastTotalValue] = useState(0);
   const [valueDirection, setValueDirection] = useState(null);
-  const [showBreakdown, setShowBreakdown] = useState(false);
   const [insightIndex, setInsightIndex] = useState(0);
   const [feedback, setFeedback] = useState(null);
   const [insightContent, setInsightContent] = useState(null);
   const [isStockPanelOpen, setIsStockPanelOpen] = useState(false);
   const [selectedPortfolioStock, setSelectedPortfolioStock] = useState(null);
 
-  const [activePortfolioId, setActivePortfolioId] = useState(null);
   const [mentorAdvice, setMentorAdvice] = useState('');
   const [loadingMentor, setLoadingMentor] = useState(false);
   const [archetype, setArchetype] = useState(null);
@@ -70,22 +76,12 @@ export default function Portfolio() {
       setLoadingArchetype(true);
       try {
         const res = await getArchetype();
-        setArchetype(res);
-      } catch (err) {}
-      setLoadingArchetype(false);
+        setArchetype(res?.data);
+      } finally {
+        setLoadingArchetype(false);
+      }
     };
     fetchArchetype();
-  }, []);
-
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const ports = await getUserPortfolios();
-        const list = Array.isArray(ports) ? ports : (ports?.result || []);
-        if (list.length > 0) setActivePortfolioId(list[0].portfolioId);
-      } catch (err) {}
-    };
-    init();
   }, []);
 
   const fetchMentorAdvice = async () => {
@@ -93,9 +89,7 @@ export default function Portfolio() {
     setLoadingMentor(true);
     try {
       const res = await getPortfolioMentorAdvice(activePortfolioId);
-      setMentorAdvice(res?.advice);
-    } catch (err) {
-      console.error(err);
+      setMentorAdvice(res?.data?.advice || res?.advice);
     } finally {
       setLoadingMentor(false);
     }
@@ -110,11 +104,12 @@ export default function Portfolio() {
     setIsStockPanelOpen(true);
   };
 
-  const handlePortfolioAction = (type, stock) => {
+  const handlePortfolioAction = async (type, stock) => {
     if (type === 'sell') {
-      const success = executeSell(stock.symbol, stock.currentValue, stock.quantity);
-      if (success) {
-        triggerFeedback(`Sold ${stock.symbol} position`, 'success');
+      const result = await executeSell(stock.symbol, stock.currentValue, stock.quantity);
+      if (result.success) {
+        setFeedback({ msg: `Sold ${stock.symbol} position`, type: 'success' });
+        setTimeout(() => setFeedback(null), 3000);
         setIsStockPanelOpen(false);
       }
     } else if (type === 'buy') {
@@ -124,148 +119,145 @@ export default function Portfolio() {
   };
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setInsightIndex(prev => (prev + 1) % MarketInsights.length);
-    }, 5000);
+    const interval = setInterval(() => setInsightIndex(prev => (prev + 1) % MarketInsights.length), 5000);
     return () => clearInterval(interval);
   }, []);
 
   const { holdings, totalInvested, totalCurrentValue, totalGain, totalYield, allocation, portfolioMood, riskLevel, topStock } = useMemo(() => {
     const totalInvested = portfolio.reduce((acc, curr) => acc + curr.invested, 0);
-    
-    const calculatedHoldings = (portfolio || []).map(stock => ({
-      ...stock,
-      status: stock.gainVal >= 0 ? 'profit' : 'loss'
-    }));
-
+    const calculatedHoldings = (portfolio || []).map(stock => ({ ...stock, status: stock.gainVal >= 0 ? 'profit' : 'loss' }));
     const totalCurrentValue = (calculatedHoldings || []).reduce((acc, curr) => acc + curr.currentValue, 0);
     const totalGain = totalCurrentValue - totalInvested;
     const totalYield = totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
     const allocation = (calculatedHoldings || []).map(h => ({ name: h.symbol, value: h.currentValue }));
+    const portfolioMood = totalYield > 2 ? 'Bullish' : totalYield < -2 ? 'Risky' : 'Mixed';
+    const riskLevel = holdings?.length === 0 ? 'None' : holdings?.length <= 3 ? 'High' : 'Balanced';
+    const topStock = (allocation || []).sort((a,b) => b.value - a.value)[0]?.name || '';
 
-    let portfolioMood = 'Mixed';
-    if (totalYield > 2) portfolioMood = 'Bullish';
-    if (totalYield < -2) portfolioMood = 'Risky';
-
-    const riskLevel = (calculatedHoldings || []).length === 0 ? 'None' : (calculatedHoldings || []).length === 1 ? 'High' : (calculatedHoldings || []).length <= 3 ? 'Moderate' : 'Balanced';
-    const topStock = (allocation || []).length > 0 ? ((allocation || []).sort((a,b) => b.value - a.value)[0]?.name || '') : '';
-
-    return {
-      holdings: calculatedHoldings,
-      totalInvested,
-      totalCurrentValue,
-      totalGain,
-      totalYield,
-      allocation,
-      portfolioMood,
-      riskLevel,
-      topStock
-    };
+    return { holdings: calculatedHoldings, totalInvested, totalCurrentValue, totalGain, totalYield, allocation, portfolioMood, riskLevel, topStock };
   }, [portfolio]);
 
-  const adaptiveInsight = useMemo(() => {
-    return getLearningInsight({
-      decisions: behaviorDecisions || [],
-      missedOpportunities: behaviorMissed || [],
-      holdings,
-      totalCurrentValue
-    });
-  }, [behaviorDecisions, behaviorMissed, holdings, totalCurrentValue]);
+  const adaptiveInsight = useMemo(() => getLearningInsight({ decisions: behaviorDecisions, missedOpportunities: behaviorMissed, holdings, totalCurrentValue }), [behaviorDecisions, behaviorMissed, holdings, totalCurrentValue]);
 
   const objectives = [
     { title: "Diversify Sectors", progress: (holdings?.length || 0) >= 3 ? 100 : ((holdings?.length || 0) / 3) * 100, icon: <Shield size={14}/> },
-    { title: "Smart Decision Streak", progress: (decisions || []).filter(d => d?.isCorrect).length >= 5 ? 100 : ((decisions || []).filter(d => d?.isCorrect).length / 5) * 100, icon: <Zap size={14}/> },
-    { title: "Portfolio Health", progress: totalYield > 0 ? 100 : 0, icon: <Activity size={14}/> }
+    { title: "Smart Decision Streak", progress: (decisions || []).filter(d => d?.action === 'BUY').length >= 5 ? 100 : ((decisions || []).filter(d => d?.action === 'BUY').length / 5) * 100, icon: <Zap size={14}/> }
   ];
 
   useEffect(() => {
-    if (totalCurrentValue > lastTotalValue && lastTotalValue !== 0) {
-      setValueDirection('up');
-    } else if (totalCurrentValue < lastTotalValue && lastTotalValue !== 0) {
-      setValueDirection('down');
-    }
+    if (totalCurrentValue > lastTotalValue && lastTotalValue !== 0) setValueDirection('up');
+    else if (totalCurrentValue < lastTotalValue && lastTotalValue !== 0) setValueDirection('down');
     setLastTotalValue(totalCurrentValue);
     const timeout = setTimeout(() => setValueDirection(null), 1000);
     return () => clearTimeout(timeout);
   }, [totalCurrentValue]);
 
-  const triggerFeedback = (msg, type = 'success') => {
-    setFeedback({ msg, type });
-    setTimeout(() => setFeedback(null), 3000);
-  };
+  if (loading) return <div className="h-screen flex items-center justify-center bg-[#020617]"><Loader2 size={40} className="text-blue-500 animate-spin" /></div>;
 
-  const handleSell = (e, stock) => {
-    e.stopPropagation();
-    const success = executeSell(stock.symbol, stock.currentValue, stock.quantity);
-    if (success) {
-      triggerFeedback(`Sold ${stock.symbol} at ${formatPrice(stock.currentValue/stock.quantity, stock.market)}`, 'success');
-    }
-  };
+  if (portfolio.length === 0) return (
+    <div className="min-h-[80vh] flex flex-col items-center justify-center px-6 text-center">
+      <div className="max-w-md w-full space-y-10">
+        <div className="w-32 h-32 bg-slate-900/80 rounded-full flex items-center justify-center border border-slate-800 shadow-2xl mx-auto"><Zap size={48} className="text-slate-700" /></div>
+        <div className="space-y-4">
+          <h2 className="text-4xl font-black text-white uppercase tracking-tighter">Start Your Journey</h2>
+          <p className="text-sm opacity-80 text-slate-400 font-bold uppercase tracking-widest">Available Capital: <span className="text-white font-black">{formatPrice(balance, marketCode)}</span></p>
+        </div>
+        <button onClick={() => navigate('/')} className="w-full bg-white text-slate-950 font-black py-4 rounded-2xl uppercase tracking-widest text-xs shadow-xl flex items-center justify-center gap-4 group">Explore Stocks <ArrowRight size={18} className="group-hover:translate-x-2 transition-transform" /></button>
+      </div>
+    </div>
+  );
 
-  const handlePortfolioClick = () => {
-    setInsightContent({
-      type: 'allocation',
-      title: 'Portfolio Breakdown',
-      explanation: 'Total value of all active holdings combined.',
-      data: (holdings || []).map(h => ({
-        label: h.symbol,
-        value: formatPrice(h.currentValue, h.market),
-        progress: totalCurrentValue > 0 ? (h.currentValue / totalCurrentValue) * 100 : 0,
-        barColor: h.status === 'profit' ? '#10b981' : '#f43f5e'
-      })),
-      insight: (holdings || []).length === 1 
-        ? "Concentrated in one asset. High volatility absorption."
-        : "Portfolio is spread across assets. Risk is distributed.",
-      actions: [{ label: 'View Allocation Chart', onClick: () => {} }]
-    });
-  };
+  return (
+    <>
+    <InsightPanel isOpen={!!insightContent} onClose={() => setInsightContent(null)} content={insightContent} />
+    <PortfolioStockPanel isOpen={isStockPanelOpen} onClose={() => setIsStockPanelOpen(false)} stock={selectedPortfolioStock} marketCode={marketCode} onAction={handlePortfolioAction} />
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full pb-32 relative">
+      <AnimatePresence>
+        {feedback && (
+          <motion.div initial={{ opacity: 0, y: -20, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }} exit={{ opacity: 0 }} className="fixed top-24 left-1/2 z-[100] px-6 py-3 rounded-full bg-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-2xl border border-white/20 backdrop-blur-md">
+            <Zap size={16} /> {feedback.msg}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-  const handleReturnsClick = () => {
-    setInsightContent({
-      type: 'return',
-      title: 'Returns Logic',
-      explanation: 'Returns show investment performance vs initial capital.',
-      data: [
-        { label: 'Total Invested', value: formatPrice(totalInvested, marketCode) },
-        { label: 'Current Value', value: formatPrice(totalCurrentValue, marketCode) },
-        { label: 'Net Profit/Loss', value: formatPrice(totalGain, marketCode), color: totalGain >= 0 ? 'text-emerald-400' : 'text-rose-400' }
-      ],
-      insight: totalYield > 5 ? "Excellent growth path." : "Small gains compound over time.",
-      actions: [{ label: 'Hide Details', onClick: () => setInsightContent(null) }]
-    });
-  };
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-8 sm:py-12">
+        <div className="grid grid-cols-1 lg:grid-cols-10 gap-4 items-start">
+          <div className="lg:col-span-6 flex flex-col gap-6">
+            <div className="p-8 rounded-[2.5rem] bg-slate-900/60 border border-white/5 relative overflow-hidden group">
+               <div className="relative z-10 flex flex-col md:flex-row items-center gap-8">
+                  <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-3xl font-black text-white shadow-2xl">
+                     {loadingArchetype ? <Loader2 className="animate-spin" size={32} /> : (archetype?.title?.charAt(0) || "U")}
+                  </div>
+                  <div className="text-center md:text-left space-y-2">
+                     <div className="flex items-center justify-center md:justify-start gap-3">
+                        <h1 className="text-2xl font-black text-white tracking-tighter uppercase">{loadingArchetype ? "Analyzing..." : (archetype?.title || "Evaluating Style")}</h1>
+                        <div className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/20 rounded-full text-[9px] font-black text-emerald-400 uppercase tracking-widest">Psych Profile</div>
+                     </div>
+                     <p className="text-blue-100/70 font-medium text-sm leading-relaxed">{loadingArchetype ? "Deep-scanning your recent market decisions..." : (archetype?.trait || "Unlock your profile in the Arena.")}</p>
+                  </div>
+               </div>
+            </div>
 
-  const handleRiskClick = () => {
-    setInsightContent({
-      type: 'risk',
-      title: 'Risk Analysis',
-      explanation: 'Risk is calculated based on capital concentration.',
-      data: [
-        { label: 'Current Risk Level', value: riskLevel, color: riskLevel === 'High' ? 'text-rose-400' : 'text-yellow-400' },
-        { label: 'Top Holding', value: topStock || 'None' }
-      ],
-      insight: riskLevel === 'High' ? "Highly concentrated portfolio." : "Risk is balanced across holdings.",
-      actions: [{ label: 'Explore More Stocks', onClick: () => navigate('/') }]
-    });
-  };
+            <div className="bg-slate-900/40 border border-slate-800 p-6 rounded-[2rem] shadow-2xl backdrop-blur-md" onClick={() => setInsightContent({ type: 'info', title: 'Value Logic', insight: 'Standardized valuation across all assets.' })}>
+              <div className="space-y-4">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Total Portfolio Value</p>
+                <motion.h3 animate={{ color: valueDirection === 'up' ? '#34d399' : valueDirection === 'down' ? '#f43f5e' : '#ffffff' }} className="text-5xl md:text-6xl font-black tracking-tighter">{formatPrice(totalCurrentValue, marketCode)}</motion.h3>
+                <div className="flex flex-wrap items-center gap-6 pt-2">
+                  <div className={`flex items-center gap-2 font-semibold text-xl md:text-2xl ${totalGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {totalGain >= 0 ? <TrendingUp size={20}/> : <TrendingDown size={20}/>}
+                    <span>{totalGain >= 0 ? '+' : ''}{formatPrice(totalGain, marketCode)}</span>
+                  </div>
+                  <span className="text-base font-medium text-slate-500">{totalYield.toFixed(2)}% Returns</span>
+                </div>
+              </div>
+            </div>
 
-  const handleStockClick = (stock) => {
-    setInsightContent({
-      type: 'stock',
-      title: `${stock.symbol} Deep Dive`,
-      explanation: `Holdings: ${Math.floor(stock.quantity)} shares at ${formatPrice(stock.buyPrice, stock.market)}.`,
-      data: [
-        { label: 'Current Value', value: formatPrice(stock.currentValue, stock.market) },
-        { label: 'Unrealized P&L', value: `${stock.status === 'profit' ? '+' : ''}${formatPrice(stock.gainVal, stock.market)}`, color: stock.status === 'profit' ? 'text-emerald-400' : 'text-rose-400' },
-        { label: 'Portfolio Impact', value: `${totalCurrentValue > 0 ? ((stock.currentValue / totalCurrentValue) * 100).toFixed(1) : 0}%` }
-      ],
-      insight: stock.gainPct > 3 ? "Strong momentum." : stock.gainPct < -3 ? "Weak trend." : "Consolidating.",
-      actions: [
-        { label: 'Add More', primary: true, onClick: () => openStockPanel(stock) },
-        { label: 'Exit Position', onClick: () => { executeSell(stock.symbol, stock.currentValue); setInsightContent(null); } }
-      ]
-    });
-  };
+            <div className="space-y-4">
+              <PortfolioSuggestionCard holdings={holdings} totalYield={totalYield} mentorAdvice={mentorAdvice} loadingMentor={loadingMentor} />
+              <div className="flex flex-col gap-4">
+                {holdings.map((stock) => (
+                  <motion.div key={stock.symbol} onClick={() => handlePortfolioStockClick(stock)} className="bg-slate-900/40 border border-slate-800 rounded-[2rem] p-6 group cursor-pointer">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+                      <div className="flex items-center gap-5 flex-1">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-lg border border-white/5 ${stock.status === 'profit' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>{(stock?.symbol || "")[0]}</div>
+                        <div>
+                          <h4 className="text-lg font-semibold text-white group-hover:text-blue-400 transition-colors">{stock.symbol}</h4>
+                          <p className="text-sm opacity-80 text-slate-500">Avg {formatPrice(stock.buyPrice, stock.currency || 'INR')} • {Math.floor(stock.quantity)} Shares</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-lg font-semibold tabular-nums ${stock.status === 'profit' ? 'text-emerald-400' : 'text-rose-400'}`}>{stock.status === 'profit' ? '+' : ''}{formatPrice(stock.gainVal, stock.currency || 'INR')}</p>
+                        <p className={`text-sm font-medium ${stock.status === 'profit' ? 'text-emerald-500' : 'text-rose-500'}`}>{stock.gainPct.toFixed(2)}%</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-4 flex flex-col gap-4 h-full">
+            <div className="p-8 rounded-[2rem] bg-[#020617] border border-blue-500/20 shadow-2xl">
+              <div className="space-y-6">
+                <div className="flex items-center gap-3"><div className="p-2.5 bg-blue-600 rounded-xl text-white"><Sparkles size={20} /></div><div><h3 className="text-xl font-black text-white uppercase tracking-tighter">AI Mentor</h3></div></div>
+                <div className="bg-white/5 p-6 rounded-2xl">
+                  {loadingMentor ? <Loader2 size={24} className="animate-spin text-blue-400 mx-auto" /> : <p className="text-sm font-bold leading-relaxed text-blue-100/90 italic">"{mentorAdvice || "Analysis in progress..."}"</p>}
+                </div>
+              </div>
+            </div>
+            <MicroLearningCard insight={adaptiveInsight} />
+            <div className="p-6 rounded-[2rem] bg-gradient-to-br from-[#0f172a] to-[#1e293b] border border-white/5">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Available Capital</p>
+              <p className="text-3xl font-black text-white mb-4">{formatPrice(balance, marketCode)}</p>
+              <button onClick={() => navigate('/')} className="w-full py-4 bg-white text-slate-900 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all flex items-center justify-center gap-2">Find Opportunities <ChevronRight size={14} /></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+    </>
+  );
+}
 
   if (portfolio.length === 0) return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="min-h-[80vh] flex flex-col items-center justify-center px-6 relative overflow-hidden text-center">
@@ -337,12 +329,12 @@ export default function Portfolio() {
                   <div className="text-center md:text-left space-y-2">
                      <div className="flex items-center justify-center md:justify-start gap-3">
                         <h1 className="text-2xl font-black text-white tracking-tighter uppercase">
-                          {loadingArchetype ? "Analyzing..." : (archetype?.title || "Evaluating Style")}
+                          {loadingArchetype ? "Analyzing..." : (typeof archetype?.title === "string" ? archetype.title : archetype?.title?.text || "Evaluating Style")}
                         </h1>
                         <div className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/20 rounded-full text-[9px] font-black text-emerald-400 uppercase tracking-widest">Psych Profile</div>
                      </div>
                      <p className="text-blue-100/70 font-medium text-sm leading-relaxed">
-                        {loadingArchetype ? "Deep-scanning your recent market decisions..." : (archetype?.trait || "Start making decisions in the Arena to unlock your psychological profile.")}
+                        {loadingArchetype ? "Deep-scanning your recent market decisions..." : (typeof archetype?.trait === "string" ? archetype.trait : archetype?.trait?.text || "Start making decisions in the Arena to unlock your psychological profile.")}
                      </p>
                   </div>
                </div>
@@ -424,12 +416,12 @@ export default function Portfolio() {
                         </div>
                         <div className="space-y-0.5">
                           <h4 className="text-lg font-semibold text-white tracking-tight group-hover:text-blue-400 transition-colors">{stock.symbol}</h4>
-                          <p className="text-sm opacity-80 text-slate-500">Avg {formatPrice(stock.buyPrice, stock.market)} • {Math.floor(stock.quantity)} Shares</p>
+                          <p className="text-sm opacity-80 text-slate-500">Avg {formatPrice(stock.buyPrice, stock.currency || 'INR')} • {Math.floor(stock.quantity)} Shares</p>
                         </div>
                       </div>
                       <div className="flex items-center justify-between w-full sm:w-auto gap-8 text-right">
                         <div>
-                          <p className={`text-lg font-semibold tabular-nums ${stock.status === 'profit' ? 'text-emerald-400' : 'text-rose-400'}`}>{stock.status === 'profit' ? '+' : ''}{formatPrice(stock.gainVal, stock.market)}</p>
+                          <p className={`text-lg font-semibold tabular-nums ${stock.status === 'profit' ? 'text-emerald-400' : 'text-rose-400'}`}>{stock.status === 'profit' ? '+' : ''}{formatPrice(stock.gainVal, stock.currency || 'INR')}</p>
                           <p className={`text-sm font-medium ${stock.status === 'profit' ? 'text-emerald-500' : 'text-rose-500'}`}>{stock.gainPct.toFixed(2)}% Returns</p>
                         </div>
                         <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
@@ -476,7 +468,7 @@ export default function Portfolio() {
                     </div>
                   ) : (
                     <p className="text-sm font-bold leading-relaxed text-blue-100/90 italic">
-                      "{mentorAdvice || "Your portfolio is ready for analysis. Keep making trades to build a behavioral profile."}"
+                      "{typeof mentorAdvice === "string" ? mentorAdvice : mentorAdvice?.text || mentorAdvice?.message || "Your portfolio is ready for analysis. Keep making trades to build a behavioral profile."}"
                     </p>
                   )}
                 </div>

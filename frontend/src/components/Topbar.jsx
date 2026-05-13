@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, BarChart3, Lightbulb, Bell, User, TrendingUp, Globe } from 'lucide-react';
+import { LayoutDashboard, Briefcase, BarChart3, Lightbulb, Bell, User, TrendingUp, Globe, Shield } from 'lucide-react';
 import { useMarket } from '../context/MarketContext';
 
 export default function Topbar() {
@@ -11,6 +11,7 @@ export default function Topbar() {
     { path: '/', name: 'Dashboard', icon: LayoutDashboard },
     { path: '/portfolio', name: 'Portfolio', icon: Briefcase },
     { path: '/market', name: 'Market', icon: BarChart3 },
+    { path: '/vault', name: 'Vault', icon: Shield },
     { path: '/insights', name: 'Insights', icon: Lightbulb },
   ];
 

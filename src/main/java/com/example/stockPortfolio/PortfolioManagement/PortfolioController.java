@@ -23,7 +23,8 @@ public class PortfolioController {
 
     private final PortfolioService portfolioService;
     private final UserService userService;
-    private final com.example.stockPortfolio.AiManagement.service.GeminiService geminiService;
+    private final com.example.stockPortfolio.MarketManagement.MarketGateway marketGateway;
+    private final com.example.stockPortfolio.AiManagement.service.AiService aiService;
 
     private User getLoggedInUser() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -47,6 +48,11 @@ public class PortfolioController {
         return ResponseEntity.ok(ApiResponse.ok(response.getResult(), "Portfolios fetched successfully"));
     }
 
+    /**
+     * Admin-only manual balance adjustment. Regular users CANNOT call this — they
+     * would be able to print free money and trivially top the leaderboard.
+     * The previous open `/{id}/balance` endpoint was a critical money-printing bug.
+     */
     public static class BalanceUpdateDTO {
         @jakarta.validation.constraints.NotNull
         public java.math.BigDecimal amount;
@@ -55,21 +61,36 @@ public class PortfolioController {
     }
 
     @PostMapping("/{id}/balance")
-    public ResponseEntity<ApiResponse<PortfolioDTO>> updateBalance(@PathVariable Long id, @Valid @RequestBody BalanceUpdateDTO payload) {
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<PortfolioDTO>> adminUpdateBalance(@PathVariable Long id,
+                                                                        @Valid @RequestBody BalanceUpdateDTO payload) {
         java.math.BigDecimal amount = payload.getAmount();
+        log.warn("ADMIN balance adjustment: portfolio={} amount={} actor={}", id, amount, getLoggedInUser().getUserId());
         PortfolioDTO updated = portfolioService.updateBalance(id, amount, getLoggedInUser().getUserId());
         return ResponseEntity.ok(ApiResponse.ok(updated, "Balance updated successfully"));
     }
 
+    // NOTE: the user-facing self-reset endpoint was removed per launch decision.
+    // Resets now go through `/api/admin/users/{id}/reset` (ROLE_ADMIN only).
+    // Users who get stuck must DM an admin who triggers the reset on their behalf.
+    // The PortfolioService.resetPortfolio method itself stays — it's invoked by AdminService.
+
     @GetMapping("/{id}/mentor")
+
     public ResponseEntity<ApiResponse<MentorAdviceResponseDTO>> getMentorAdvice(@PathVariable Long id) {
         User user = getLoggedInUser();
-        List<Map<String, Object>> holdings = portfolioService.getHoldingsByPortfolioId(id, user.getUserId());
-        PortfolioDTO portfolio = portfolioService.getPortfolioById(id, user.getUserId());
         
-        String advice = geminiService.getPortfolioMentorAdvice(holdings, portfolio.getBalance() != null ? portfolio.getBalance().doubleValue() : 0.0);
+        // READ PRECOMPUTED FROM GATEWAY
+        String advice = (String) marketGateway.getUserInsight(user.getUserId(), "mentor:" + id);
+        
+        if (advice == null) {
+            MentorAdviceResponseDTO response = MentorAdviceResponseDTO.builder()
+                    .advice("Your portfolio mentor is reviewing your strategy. Check back shortly for deep insights.")
+                    .build();
+            return ResponseEntity.ok(ApiResponse.syncing(response, "Insight is being generated...", "fallback"));
+        }
         
         MentorAdviceResponseDTO response = MentorAdviceResponseDTO.builder().advice(advice).build();
-        return ResponseEntity.ok(ApiResponse.ok(response, "AI Mentor advice generated"));
+        return ResponseEntity.ok(ApiResponse.ok(response, "AI Mentor advice fetched from cache", "cache"));
     }
 }

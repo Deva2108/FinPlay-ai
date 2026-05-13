@@ -106,7 +106,7 @@ export default function BuyModal({ stock, balance, isOpen, onClose, onConfirm })
                       />
                     ) : (
                       <div className="text-xl font-black text-white w-full text-center tabular-nums">
-                        {formatPrice(currentMarketPrice, stock.market)}
+                        {formatPrice(currentMarketPrice, stock.currency || 'INR')}
                       </div>
                     )}
                   </div>
@@ -117,17 +117,17 @@ export default function BuyModal({ stock, balance, isOpen, onClose, onConfirm })
               <div className="bg-slate-900/40 rounded-[2rem] p-6 border border-white/5 space-y-5">
                 <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
                   <span className="text-slate-500">Available Balance</span>
-                  <span className="text-white">{formatPrice(balance, stock.market)}</span>
+                  <span className="text-white">{formatPrice(balance, stock.currency || 'INR')}</span>
                 </div>
                 <div className="h-px bg-white/5" />
                 <div className="flex justify-between items-center">
                   <div className="space-y-1">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Est. Order Value</p>
-                    <p className={`text-xl font-black ${canAfford ? 'text-white' : 'text-rose-500'}`}>{formatPrice(totalRequired, stock.market)}</p>
+                    <p className={`text-xl font-black ${canAfford ? 'text-white' : 'text-rose-500'}`}>{formatPrice(totalRequired, stock.currency || 'INR')}</p>
                   </div>
                   <div className="text-right space-y-1">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Post-Trade Balance</p>
-                    <p className="text-xs font-black text-slate-300">{formatPrice(remainingBalance, stock.market)}</p>
+                    <p className="text-xs font-black text-slate-300">{formatPrice(remainingBalance, stock.currency || 'INR')}</p>
                   </div>
                 </div>
               </div>

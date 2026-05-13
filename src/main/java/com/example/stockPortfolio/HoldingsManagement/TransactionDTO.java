@@ -2,12 +2,14 @@ package com.example.stockPortfolio.HoldingsManagement;
 
 import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
 @Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class TransactionDTO {
@@ -20,9 +22,9 @@ public class TransactionDTO {
     @NotBlank(message = "Symbol is required")
     private String symbol;
     
-    @Min(value = 1, message = "Quantity must be at least 1")
-    @Max(value = 1000, message = "Educational limit: Max 1000 shares per trade")
-    private int quantity;
+    @NotNull(message = "Quantity is required")
+    @DecimalMin(value = "0.0001", message = "Quantity must be at least 0.0001")
+    private java.math.BigDecimal quantity;
     
     @DecimalMin(value = "1.0", message = "Price must be at least $1.00")
     @DecimalMax(value = "100000.0", message = "Price exceeds playground limits")
@@ -30,7 +32,8 @@ public class TransactionDTO {
     
     @NotBlank(message = "Transaction type (BUY/SELL) is required")
     private String type;
-    
+
+    private String currency; // "INR"
     private java.time.LocalDateTime transactionDate;
     private String paymentStatus;
     private String notes;

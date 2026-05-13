@@ -46,11 +46,23 @@ const Onboarding = () => {
     
     try {
       const res = await getOnboardingScenario(type);
-      setDynamicScenario(res?.scenario || "You just received ₹2,000 from a side gig. What's your first move?");
+      
+      if (res?.meta?.status === "ERROR") {
+        throw new Error(res.message || "Failed to fetch scenario");
+      }
+
+      const scenario = res?.data?.scenario || res?.scenario;
+      setDynamicScenario(typeof scenario === "string" ? scenario : scenario?.text || scenario?.message || "You just received ₹2,000 from a side gig. What's your first move?");
+      
+      // Handle SYNCING status: Stay in syncing state a bit longer to simulate AI "thinking"
+      if (res?.meta?.status === "SYNCING") {
+        setTimeout(() => setIsSyncing(false), 2000);
+      } else {
+        setIsSyncing(false);
+      }
     } catch (err) {
       console.error("Scenario fetch failed", err);
       setDynamicScenario("You just received ₹2,000 from a side gig. What's your first move?");
-    } finally {
       setIsSyncing(false);
     }
   };
@@ -59,12 +71,27 @@ const Onboarding = () => {
     setIsSyncing(true);
     try {
       const res = await getOnboardingFeedback(choice, userType);
-      setAiFeedback(res?.feedback || (choice === 'GROW' ? "Smart choice. Let's see how this grows." : "Instant joy, but it's gone now."));
-      setStep(choice === 'GROW' ? 'grow_result' : 'spend_result');
+      
+      if (res?.meta?.status === "ERROR") {
+        throw new Error(res.message || "Feedback failed");
+      }
+
+      const feedback = res?.data?.feedback || res?.feedback;
+      setAiFeedback(typeof feedback === "string" ? feedback : feedback?.text || feedback?.message || (choice === 'GROW' ? "Smart choice. Let's see how this grows." : "Instant joy, but it's gone now."));
+      
+      if (res?.meta?.status === "SYNCING") {
+        setTimeout(() => {
+          setIsSyncing(false);
+          setStep(choice === 'GROW' ? 'grow_result' : 'spend_result');
+        }, 1500);
+      } else {
+        setIsSyncing(false);
+        setStep(choice === 'GROW' ? 'grow_result' : 'spend_result');
+      }
     } catch (err) {
+      console.error("Decision feedback failed", err);
       setAiFeedback(choice === 'GROW' ? "Smart choice. Let's see how this grows." : "Instant joy, but it's gone now.");
       setStep(choice === 'GROW' ? 'grow_result' : 'spend_result');
-    } finally {
       setIsSyncing(false);
     }
   };
@@ -141,7 +168,7 @@ const Onboarding = () => {
           </motion.div>
         )}
 
-        {/* STEP 1: AI SYNCING / INTRO */}
+        {/* STEP 1: SMART SYNCING / INTRO */}
         {step === 1 && (
           <motion.div 
             key="sync"
@@ -193,7 +220,7 @@ const Onboarding = () => {
                   <span className="text-[10px] font-black uppercase tracking-widest">Personalized Dilemma</span>
                 </div>
                 <p className="text-xl font-bold leading-relaxed text-white">
-                  "{dynamicScenario}"
+                  "{typeof dynamicScenario === "string" ? dynamicScenario : dynamicScenario?.text || dynamicScenario?.message || "Preparing your challenge..."}"
                 </p>
               </div>
             </motion.div>
@@ -234,7 +261,7 @@ const Onboarding = () => {
               <motion.div variants={itemVariants} className="p-8 rounded-[2.5rem] bg-white/5 border border-white/10 text-left relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-4 opacity-10"><Sparkles size={60} className="text-blue-400" /></div>
                 <p className="text-base text-white font-bold leading-relaxed relative z-10">
-                  "{aiFeedback}"
+                  "{typeof aiFeedback === "string" ? aiFeedback : aiFeedback?.text || aiFeedback?.message || "Analyzing your decision..."}"
                 </p>
               </motion.div>
             </div>

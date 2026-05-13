@@ -23,7 +23,7 @@ export default function Login() {
         password: password.trim()
       });
 
-      if (data?.token) {
+      if (data?.success) {
         navigate('/dashboard');
       } else {
         throw new Error('Authentication failed');
