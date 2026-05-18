@@ -136,26 +136,46 @@ public class MarketDataScheduler {
 
         if (!marketOpen && urgentSymbols.isEmpty()) return;
 
-        // 1. COLLECT TARGETS (Holdings + Priorities + Trending)
+        // 1. COLLECT TARGETS (Priorities + Holdings + Universe)
         Set<String> targets = new LinkedHashSet<>();
+        
+        // Always include urgent symbols first
         urgentSymbols.forEach(s -> {
             String n = symbolNormalizer.normalize(s);
             if (n != null) targets.add(n);
         });
 
+        // Collect all potential symbols
+        List<String> allSymbols = new ArrayList<>();
         try {
             holdingRepo.findAllDistinctSymbols().forEach(s -> {
                 String n = symbolNormalizer.normalize(s);
-                if (n != null) targets.add(n);
+                if (n != null && !targets.contains(n)) allSymbols.add(n);
             });
         } catch (Exception e) {
             log.warn("Failed to fetch holdings: {}", e.getMessage());
         }
-
-        // Add small slice of universe to keep everything relatively fresh
+        
         List<String> universe = getUniverse();
-        targets.addAll(takeWindow(universe, normalIndex, 20));
-        normalIndex += 20;
+        universe.forEach(s -> {
+            if (!targets.contains(s) && !allSymbols.contains(s)) {
+                allSymbols.add(s);
+            }
+        });
+
+        // 2. APPLY BATCH ROTATION
+        int batchSize = 10;
+        int remainingSlots = batchSize - targets.size();
+        
+        if (remainingSlots > 0 && !allSymbols.isEmpty()) {
+            if (normalIndex >= allSymbols.size()) {
+                normalIndex = 0;
+            }
+            
+            int endIndex = Math.min(normalIndex + remainingSlots, allSymbols.size());
+            targets.addAll(allSymbols.subList(normalIndex, endIndex));
+            normalIndex = endIndex;
+        }
 
         List<String> symbolsToFetch = new ArrayList<>(targets);
         if (symbolsToFetch.isEmpty()) return;
@@ -163,16 +183,23 @@ public class MarketDataScheduler {
         log.info("Starting batch market hydration for {} symbols...", symbolsToFetch.size());
 
         try {
-            // 2. BATCH FETCH (The staff-level optimization)
-            // Fetch everything in 1 or 2 API calls (Chunked inside Gateway)
+            // 3. FETCH & UPDATE MIRROR
             Map<String, Map<String, Object>> quotes = externalMarketDataGateway.fetchTwelveDataBatch(symbolsToFetch);
             
-            // 3. UPDATE MIRROR
-            quotes.forEach(marketGateway::updateMirror);
+            // 4. FALLBACK: If batch returns nothing (limits/outage), try individual fallback chain
+            if (quotes.isEmpty()) {
+                log.info("Batch fetch returned 0 results. Falling back to individual provider chain.");
+                for (String s : symbolsToFetch) {
+                    Map<String, Object> q = externalMarketDataGateway.fetchQuoteWithFallback(s);
+                    if (q != null) marketGateway.updateMirror(s, q);
+                }
+            } else {
+                quotes.forEach(marketGateway::updateMirror);
+            }
             
-            // 4. CLEANUP
-            marketGateway.clearPrioritySymbols(quotes.keySet());
-            log.info("Successfully updated mirror for {} symbols.", quotes.size());
+            // 5. CLEANUP
+            marketGateway.clearPrioritySymbols(symbolsToFetch);
+            log.info("Successfully updated mirror for {} symbols.", Math.max(quotes.size(), 0));
             
         } catch (Exception e) {
             log.error("Batch hydration failed: {}", e.getMessage());

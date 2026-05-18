@@ -421,8 +421,3 @@ function ConfirmModal({ message, onConfirm, onCancel }) {
     </ModalShell>
   );
 }
- );
-}
-    </ModalShell>
-  );
-}

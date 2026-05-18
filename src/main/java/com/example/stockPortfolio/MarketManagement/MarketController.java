@@ -201,10 +201,20 @@ public class MarketController {
             if (normalized == null) return ResponseEntity.badRequest().body(ApiResponse.error("Invalid symbol"));
 
             // 1. Get Live Price from Mirror
-            Map<String, Object> quote = marketGateway.getStockQuote(normalized);
-            
+            ApiResponse<Map<String, Object>> quoteResp = marketGateway.getStockQuote(normalized);
+            if (quoteResp == null || !quoteResp.isSuccess()) {
+                return ResponseEntity.ok(quoteResp);
+            }
+
             // 2. Get Financials from Redis (populated by Google Sheets)
-            Map<String, Object> financials = marketGateway.getFinancials(normalized);
+            ApiResponse<Map<String, Object>> financialsResp = marketGateway.getFinancials(normalized);
+            if (financialsResp == null || !financialsResp.isSuccess()) {
+                return ResponseEntity.ok(financialsResp);
+            }
+
+            // Extract data after successful checks
+            Map<String, Object> quote = quoteResp.getData();
+            Map<String, Object> financials = financialsResp.getData();
 
             // 3. Aggregate
             Map<String, Object> details = new HashMap<>();

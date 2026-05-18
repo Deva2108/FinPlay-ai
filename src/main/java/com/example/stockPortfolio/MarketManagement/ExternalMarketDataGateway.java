@@ -178,8 +178,8 @@ public class ExternalMarketDataGateway {
                 return null;
             }
 
-            double price = Double.parseDouble(quoteResponse.get("price").toString());
-            double changePct = Double.parseDouble(quoteResponse.getOrDefault("percent_change", "0").toString());
+            double price = safeParseDouble(quoteResponse.get("price"));
+            double changePct = safeParseDouble(quoteResponse.getOrDefault("percent_change", "0"));
 
             Map<String, Object> res = new HashMap<>();
             res.put("symbol", normalized);
@@ -228,8 +228,8 @@ public class ExternalMarketDataGateway {
             return null;
         }
 
-        double current = Double.parseDouble(quote.get("05. price").toString());
-        double changePct = Double.parseDouble(quote.get("10. change percent").toString().replace("%", ""));
+        double current = safeParseDouble(quote.get("05. price"));
+        double changePct = safeParseDouble(quote.get("10. change percent").toString().replace("%", ""));
 
         Map<String, Object> result = new HashMap<>();
         result.put("symbol", normalized);
@@ -262,8 +262,8 @@ public class ExternalMarketDataGateway {
             return null;
         }
 
-        double current = Double.parseDouble(response.get("c").toString());
-        double previousClose = Double.parseDouble(String.valueOf(response.getOrDefault("pc", 0)));
+        double current = safeParseDouble(response.get("c"));
+        double previousClose = safeParseDouble(response.getOrDefault("pc", 0));
         double changePct = previousClose != 0 ? ((current - previousClose) / previousClose) * 100 : 0;
 
         Map<String, Object> result = new HashMap<>();
@@ -439,7 +439,7 @@ public class ExternalMarketDataGateway {
             for (Map<String, String> val : values) {
                 Map<String, Object> point = new HashMap<>();
                 point.put("date", val.get("datetime")); // Standardized field name
-                point.put("close", Double.parseDouble(val.get("close")));
+                point.put("close", safeParseDouble(val.get("close")));
                 formatted.add(point);
             }
             
@@ -478,7 +478,13 @@ public class ExternalMarketDataGateway {
 
         // 2. Fetch in chunks of 25 (Safe limit for Twelve Data Free Tier)
         Map<String, Map<String, Object>> allResults = new HashMap<>();
+        int requestCount = 0;
         for (int i = 0; i < resolvedSymbols.size(); i += 25) {
+            if (requestCount >= 5) { // Safety limit: don't burst too many calls in one scheduler cycle
+                log.warn("Twelve Data Batch quota safeguard: limiting to 5 chunks per cycle");
+                break;
+            }
+            
             List<String> chunk = resolvedSymbols.subList(i, Math.min(i + 25, resolvedSymbols.size()));
             String batchString = String.join(",", chunk);
 
@@ -488,7 +494,12 @@ public class ExternalMarketDataGateway {
                     .toUriString();
 
             try {
+                // Rate control delay to prevent instant 429
+                if (requestCount > 0) Thread.sleep(1000); 
+                
                 Map<String, Object> response = restTemplate.getForObject(url, Map.class);
+                requestCount++;
+                
                 if (response == null) continue;
 
                 // Twelve Data returns a single Map if only 1 symbol, or Map<Symbol, Map> if multiple
@@ -502,6 +513,9 @@ public class ExternalMarketDataGateway {
                         }
                     }
                 }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
             } catch (Exception e) {
                 log.warn("Twelve Data Batch failed for chunk {}: {}", batchString, e.getMessage());
             }
@@ -516,8 +530,8 @@ public class ExternalMarketDataGateway {
         String normalized = reverseMap.get(tSym);
         if (normalized == null) return;
 
-        double price = Double.parseDouble(data.get("price").toString());
-        double changePct = Double.parseDouble(data.getOrDefault("percent_change", "0").toString());
+        double price = safeParseDouble(data.get("price"));
+        double changePct = safeParseDouble(data.getOrDefault("percent_change", "0"));
 
         Map<String, Object> quote = new HashMap<>();
         quote.put("symbol", normalized);
@@ -612,5 +626,14 @@ public class ExternalMarketDataGateway {
             log.debug("Cache read failed for {}: {}", symbol, e.getMessage());
         }
         return null;
+    }
+
+    private double safeParseDouble(Object v) {
+        if (v == null) return 0.0;
+        try {
+            return Double.parseDouble(v.toString());
+        } catch (Exception e) {
+            return 0.0;
+        }
     }
 }

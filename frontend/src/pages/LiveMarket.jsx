@@ -18,6 +18,7 @@ export default function LiveMarket() {
   const [details, setDetails] = useState(null);
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [loadingChart, setLoadingChart] = useState(false);
   const [timeframe, setTimeframe] = useState('1D');
   const [constituents, setConstituents] = useState([]);
@@ -31,12 +32,19 @@ export default function LiveMarket() {
 
   const fetchData = async () => {
     setLoading(true);
+    setIsSyncing(false);
     try {
       const [detailsRes, quotesRes] = await Promise.all([
         getStockDetails(symbol),
         getLiveQuotes(constituentsList)
       ]);
-      setDetails(detailsRes?.data);
+      
+      if (detailsRes?.syncing) {
+        setIsSyncing(true);
+      } else {
+        setDetails(detailsRes?.data);
+      }
+      
       setConstituents(quotesRes?.data || []);
     } catch (err) {
       console.error("Failed to load market hub", err);
@@ -82,12 +90,16 @@ export default function LiveMarket() {
               <InfoTooltip concept="index" />
             </h1>
           </div>
-          <p className="text-2xl font-black text-white flex items-center gap-3">
-            {currencySymbol}{details?.price || '0.00'}
-            <span className={`text-sm font-black ${isUp ? 'text-emerald-500' : 'text-rose-500'}`}>
-              {isUp ? '+' : ''}{details?.change}%
-            </span>
-          </p>
+          {isSyncing ? (
+            <p className="text-sm font-black text-slate-500 uppercase tracking-widest animate-pulse">Updating market data...</p>
+          ) : (
+            <p className="text-2xl font-black text-white flex items-center gap-3">
+              {currencySymbol}{details?.price ?? '--'}
+              <span className={`text-sm font-black ${isUp ? 'text-emerald-500' : 'text-rose-500'}`}>
+                {isUp ? '+' : ''}{details?.change ?? '--'}%
+              </span>
+            </p>
+          )}
         </div>
 
         <div className="flex gap-1 bg-white/5 p-1 rounded-2xl border border-white/5">
@@ -168,9 +180,9 @@ export default function LiveMarket() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-black text-white tracking-tighter">{currencySymbol}{stock.price}</p>
+                  <p className="text-sm font-black text-white tracking-tighter">{currencySymbol}{stock.price ?? '--'}</p>
                   <p className={`text-[10px] font-black ${stock.changesPercentage >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {stock.changesPercentage >= 0 ? '+' : ''}{stock.changesPercentage}%
+                    {stock.changesPercentage >= 0 ? '+' : ''}{stock.changesPercentage ?? '--'}%
                   </p>
                 </div>
               </motion.div>

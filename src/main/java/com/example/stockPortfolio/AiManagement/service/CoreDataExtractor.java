@@ -1,5 +1,6 @@
 package com.example.stockPortfolio.AiManagement.service;
 
+import com.example.stockPortfolio.HoldingsManagement.ApiResponse;
 import com.example.stockPortfolio.HoldingsManagement.HoldingService;
 import com.example.stockPortfolio.MarketManagement.MarketGateway;
 import com.example.stockPortfolio.MarketManagement.NewsApiService;
@@ -68,29 +69,10 @@ public class CoreDataExtractor {
 
         try {
             // 1. Price data
-            Map<String, Object> quote = marketGateway.getStockQuote(symbol);
-            if (quote != null) {
-                ctx.currentPrice = getDouble(quote, "c", 0);
-                ctx.priceChange = getDouble(quote, "d", 0);
-                ctx.priceChangePct = getDouble(quote, "dp", 0);
-                ctx.previousClose = getDouble(quote, "pc", 0);
-                ctx.volume = getDouble(quote, "v", 0);
-                
-                // Fetch high/low from mirror if available (Simulation of mature data)
-                ctx.yearHigh = getDouble(quote, "yearHigh", ctx.currentPrice * 1.2);
-                ctx.yearLow = getDouble(quote, "yearLow", ctx.currentPrice * 0.8);
-                ctx.monthHigh = getDouble(quote, "monthHigh", ctx.currentPrice * 1.05);
-                ctx.monthLow = getDouble(quote, "monthLow", ctx.currentPrice * 0.95);
-                ctx.twoYearAgoPrice = getDouble(quote, "twoYearPrice", ctx.currentPrice * 0.75);
-            }
+            extractStockData(ctx, symbol);
 
             // 2. Market linkages (Index vs Stock)
-            String marketType = symbolNormalizer.isIndian(symbol) ? "INDIA" : "US";
-            String indexSymbol = marketType.equals("INDIA") ? "^NSEI" : "SPY";
-            Map<String, Object> indexQuote = marketGateway.getStockQuote(indexSymbol);
-            if (indexQuote != null) {
-                ctx.indexChangePct = getDouble(indexQuote, "dp", 0);
-            }
+            extractMarketContext(ctx, symbol);
 
             // 3. Mocked Historical Data
             ctx.weekChangePct = ctx.priceChangePct * 2.5; 
@@ -111,7 +93,7 @@ public class CoreDataExtractor {
                 try {
                     ctx.portfolioExposure = holdingService.getUserExposure(userId, symbol);
                     ctx.userOwnsStock = ctx.portfolioExposure > 0;
-                    
+
                     // Fetch real archetype from DecisionService logic
                     Map<String, String> behavior = decisionService.getInsights();
                     ctx.userArchetype = behavior.getOrDefault("behaviorType", "BALANCED").toUpperCase();
@@ -132,6 +114,35 @@ public class CoreDataExtractor {
             log.error("Error extracting context for {}: {}", symbol, e.getMessage());
             ctx.sentiment = "NEUTRAL";
             return ctx;
+        }
+    }
+
+    private void extractStockData(InsightContext ctx, String symbol) {
+        ApiResponse<Map<String, Object>> quoteResp = marketGateway.getStockQuote(symbol);
+        Map<String, Object> quote = quoteResp != null ? quoteResp.getData() : null;
+        if (quote != null) {
+            ctx.currentPrice = getDouble(quote, "c", 0);
+            ctx.priceChange = getDouble(quote, "d", 0);
+            ctx.priceChangePct = getDouble(quote, "dp", 0);
+            ctx.previousClose = getDouble(quote, "pc", 0);
+            ctx.volume = getDouble(quote, "v", 0);
+
+            // Fetch high/low from mirror if available (Simulation of mature data)
+            ctx.yearHigh = getDouble(quote, "yearHigh", ctx.currentPrice * 1.2);
+            ctx.yearLow = getDouble(quote, "yearLow", ctx.currentPrice * 0.8);
+            ctx.monthHigh = getDouble(quote, "monthHigh", ctx.currentPrice * 1.05);
+            ctx.monthLow = getDouble(quote, "monthLow", ctx.currentPrice * 0.95);
+            ctx.twoYearAgoPrice = getDouble(quote, "twoYearPrice", ctx.currentPrice * 0.75);
+        }
+    }
+
+    private void extractMarketContext(InsightContext ctx, String symbol) {
+        String marketType = symbolNormalizer.isIndian(symbol) ? "INDIA" : "US";
+        String indexSymbol = marketType.equals("INDIA") ? "^NSEI" : "SPY";
+        ApiResponse<Map<String, Object>> indexResp = marketGateway.getStockQuote(indexSymbol);
+        Map<String, Object> indexQuote = indexResp != null ? indexResp.getData() : null;
+        if (indexQuote != null) {
+            ctx.indexChangePct = getDouble(indexQuote, "dp", 0);
         }
     }
 

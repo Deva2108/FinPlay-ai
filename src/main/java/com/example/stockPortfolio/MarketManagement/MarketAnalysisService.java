@@ -31,7 +31,7 @@ public class MarketAnalysisService {
                     if (quote != null) {
                         Map<String, Object> enriched = new HashMap<>(quote);
                         enriched.put("sector", u.getSector());
-                        enriched.put("marketCap", "Mid Cap");
+                        enriched.put("marketCap", u.getMarketCap() != null ? u.getMarketCap() : "Mid Cap");
                         return enriched;
                     }
                     return null;

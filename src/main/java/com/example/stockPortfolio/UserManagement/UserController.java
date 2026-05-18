@@ -56,6 +56,11 @@ public class UserController {
 
     @PutMapping("/api/user/profile/{email}")
     public ResponseEntity<ApiResponse<UserResponseDTO>> update(@PathVariable String email, @Valid @RequestBody ProfileUpdateRequestDTO updateRequest){
+        String authEmail = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName();
+        if (!authEmail.equalsIgnoreCase(email)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(ApiResponse.error("Unauthorized: You can only update your own profile."));
+        }
         UserResponseDTO updatedUser = userService.editProfile(email, updateRequest);
         return ResponseEntity.ok(ApiResponse.ok(updatedUser, "Profile updated successfully"));
     }

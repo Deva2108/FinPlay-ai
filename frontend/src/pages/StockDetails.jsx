@@ -21,6 +21,8 @@ export default function StockDetails() {
   const [chart, setChart] = useState([]);
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [error, setError] = useState(null);
   const [loadingChart, setLoadingChart] = useState(false);
   const [timeframe, setTimeframe] = useState('1M');
   const [isInWatchlist, setIsInWatchlist] = useState(false);
@@ -28,15 +30,27 @@ export default function StockDetails() {
 
   const fetchData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const [detailsRes, newsRes, watchlistRes] = await Promise.all([
         getStockDetails(symbol),
         getNews(symbol),
         checkWatchlist(symbol)
       ]);
-      setStock(detailsRes?.data);
+      
+      if (detailsRes?.syncing) {
+        setIsSyncing(true);
+      } else if (detailsRes?.error) {
+        setError(detailsRes.message || "Failed to load stock details");
+      } else {
+        setStock(detailsRes?.data);
+        setIsSyncing(false);
+      }
+      
       setNews(newsRes?.data || []);
       setIsInWatchlist(watchlistRes?.data);
+    } catch (err) {
+      setError("An unexpected error occurred");
     } finally {
       setLoading(false);
     }
@@ -60,6 +74,14 @@ export default function StockDetails() {
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-[#020617]"><Loader2 size={40} className="text-blue-500 animate-spin" /></div>;
 
+  if (error) return (
+    <div className="h-screen flex flex-col items-center justify-center bg-[#020617] space-y-4">
+      <AlertTriangle size={48} className="text-rose-500" />
+      <p className="text-white font-bold">{error}</p>
+      <button onClick={fetchData} className="px-6 py-2 bg-blue-600 text-white rounded-xl text-xs font-black uppercase">Retry</button>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-[#020617]">
       <div className="max-w-7xl mx-auto p-6 sm:p-10 space-y-10 pb-32">
@@ -68,50 +90,59 @@ export default function StockDetails() {
             <button onClick={() => navigate(-1)} className="p-3 bg-white/5 rounded-2xl transition-all border border-white/5"><ArrowLeft size={24} className="text-slate-400" /></button>
             <div className="space-y-1">
               <div className="flex items-center gap-4">
-                 <h1 className="text-5xl font-black text-white tracking-tighter uppercase">{stock?.symbol}</h1>
-                 <div className={`px-4 py-1.5 rounded-xl font-black text-sm ${isUp ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>{isUp ? '+' : ''}{stock?.change}%</div>
+                 <h1 className="text-5xl font-black text-white tracking-tighter uppercase">{symbol}</h1>
+                 {stock && (
+                   <div className={`px-4 py-1.5 rounded-xl font-black text-sm ${isUp ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>{isUp ? '+' : ''}{stock?.change}%</div>
+                 )}
               </div>
               <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Market Terminal</p>
             </div>
           </div>
-          <DataBadge meta={stock?.meta} />
+          {stock && <DataBadge meta={stock?.meta} />}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-          <div className="lg:col-span-8">
-            <div className="bg-slate-900/40 rounded-[3rem] border border-white/5 p-8 sm:p-10 relative overflow-hidden group">
-               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-10">
-                  <div>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Price</p>
-                    <p className="text-5xl font-black text-white tracking-tighter">{formatPrice(stock?.price, currency)}</p>
-                    <div className="flex items-center gap-2 mt-2">
-                       <InfoTooltip concept="pnl">
-                          <p className="text-[9px] font-bold text-blue-400/80 uppercase tracking-widest">Master P&L logic to build edge</p>
-                       </InfoTooltip>
+        {isSyncing ? (
+          <div className="bg-slate-900/40 rounded-[3rem] border border-white/5 p-20 flex flex-col items-center justify-center space-y-4">
+            <Loader2 size={40} className="text-blue-500 animate-spin" />
+            <p className="text-xl font-bold text-slate-400">Fetching latest market data...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+            <div className="lg:col-span-8">
+              <div className="bg-slate-900/40 rounded-[3rem] border border-white/5 p-8 sm:p-10 relative overflow-hidden group">
+                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-10">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Price</p>
+                      <p className="text-5xl font-black text-white tracking-tighter">{formatPrice(stock?.price, currency)}</p>
+                      <div className="flex items-center gap-2 mt-2">
+                         <InfoTooltip concept="pnl">
+                            <p className="text-[9px] font-bold text-blue-400/80 uppercase tracking-widest">Master P&L logic to build edge</p>
+                         </InfoTooltip>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex bg-slate-900/80 rounded-2xl p-1 border border-white/5 gap-1">
-                    {['1D', '1W', '1M', '1Y'].map((tf) => (
-                      <button key={tf} onClick={() => setTimeframe(tf)} className={`px-5 py-2 rounded-xl text-[10px] font-black transition-all ${timeframe === tf ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-white'}`}>{tf}</button>
-                    ))}
-                  </div>
+                    <div className="flex bg-slate-900/80 rounded-2xl p-1 border border-white/5 gap-1">
+                      {['1D', '1W', '1M', '1Y'].map((tf) => (
+                        <button key={tf} onClick={() => setTimeframe(tf)} className={`px-5 py-2 rounded-xl text-[10px] font-black transition-all ${timeframe === tf ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-white'}`}>{tf}</button>
+                      ))}
+                    </div>
+                 </div>
+                 <div className="h-[400px] w-full relative">
+                    {loadingChart && <div className="absolute inset-0 z-10 bg-[#020617]/40 backdrop-blur-sm flex items-center justify-center rounded-3xl"><Zap size={32} className="text-blue-500 animate-spin" /></div>}
+                    <ChartComponent data={chart} meta={stock?.meta} color={isUp ? '#10b981' : '#f43f5e'} height={400} />
+                 </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-4 space-y-8">
+               <div className="p-10 rounded-[3rem] bg-gradient-to-br from-indigo-600/20 to-blue-600/5 border border-indigo-500/20 relative overflow-hidden shadow-2xl">
+                  <div className="absolute top-0 right-0 p-6 opacity-10"><Bot size={100} className="text-indigo-400" /></div>
+                  <div className="flex items-center gap-3 mb-6"><Bot size={20} className="text-indigo-400" /><span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Mentor Analysis</span></div>
+                  <p className="text-xl font-bold text-white leading-relaxed italic mb-8">"{stock?.mentorLine || "Analyzing market DNA..."}"</p>
                </div>
-               <div className="h-[400px] w-full relative">
-                  {loadingChart && <div className="absolute inset-0 z-10 bg-[#020617]/40 backdrop-blur-sm flex items-center justify-center rounded-3xl"><Zap size={32} className="text-blue-500 animate-spin" /></div>}
-                  <ChartComponent data={chart} meta={stock?.meta} color={isUp ? '#10b981' : '#f43f5e'} height={400} />
-               </div>
+               <button onClick={() => navigate('/')} className="w-full py-5 bg-white/5 border border-white/10 text-white rounded-[2rem] text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3"><Activity size={16} /> Enter Trading Arena</button>
             </div>
           </div>
-
-          <div className="lg:col-span-4 space-y-8">
-             <div className="p-10 rounded-[3rem] bg-gradient-to-br from-indigo-600/20 to-blue-600/5 border border-indigo-500/20 relative overflow-hidden shadow-2xl">
-                <div className="absolute top-0 right-0 p-6 opacity-10"><Bot size={100} className="text-indigo-400" /></div>
-                <div className="flex items-center gap-3 mb-6"><Bot size={20} className="text-indigo-400" /><span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Mentor Analysis</span></div>
-                <p className="text-xl font-bold text-white leading-relaxed italic mb-8">"{stock?.mentorLine || "Analyzing market DNA..."}"</p>
-             </div>
-             <button onClick={() => navigate('/')} className="w-full py-5 bg-white/5 border border-white/10 text-white rounded-[2rem] text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3"><Activity size={16} /> Enter Trading Arena</button>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

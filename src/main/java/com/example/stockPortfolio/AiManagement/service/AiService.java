@@ -32,9 +32,23 @@ public class AiService {
             String symbol = "Market";
             if (userPrompt.toLowerCase().contains("india")) symbol = "NIFTY 50";
             if (userPrompt.toLowerCase().contains("us")) symbol = "S&P 500";
-            
-            RichInsightDTO dto = deterministicInsightService.generateInsight(symbol, null);
-            
+
+            RichInsightDTO dto = null;
+            try {
+                Object result = deterministicInsightService.generateInsight(symbol, null);
+                if (result instanceof RichInsightDTO) {
+                    dto = (RichInsightDTO) result;
+                } else if (result instanceof Map) {
+                    dto = objectMapper.convertValue(result, RichInsightDTO.class);
+                }
+            } catch (Exception cacheEx) {
+                log.warn("Deterministic insight unavailable (non-fatal), continuing with fallback: {}", cacheEx.getMessage());
+            }
+
+            if (dto == null) {
+                return "{\"whatHappened\":\"Market is currently in a stable consolidation phase.\", \"whyItMatters\":\"Data is being synced.\", \"action\":\"WAIT\", \"confidence\": 0.5}";
+            }
+
             // Explicitly handle serialization with a fresh, safe mapper to avoid config conflicts
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(dto);
         } catch (Exception e) {

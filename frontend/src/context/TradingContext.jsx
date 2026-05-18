@@ -3,7 +3,6 @@ import {
   getUserPortfolios, 
   getHoldings, 
   executeTrade, 
-  recordGameResult, 
   getUserInsights, 
   trackDecision as apiTrackDecision 
 } from '../services/api';
@@ -113,15 +112,9 @@ export function TradingProvider({ children }) {
     const impactAmount = parseFloat(amount) || 0;
     setGameImpact({ amount: impactAmount, type, timestamp: Date.now() });
     
-    if ((type === 'gain' || type === 'loss') && activePortfolioId) {
-      try {
-        await recordGameResult(activePortfolioId, impactAmount);
-        setBalance(prev => prev + impactAmount);
-      } catch (err) {
-        setBalance(prev => prev + impactAmount);
-      }
-    }
-  }, [activePortfolioId]);
+    // Logic for sync with backend removed as no valid endpoint exists for game result balance adjustment
+    // and frontend must not modify balance directly.
+  }, []);
 
   const executeBuy = useCallback(async (stock, quantity) => {
     const qty = parseFloat(quantity);
@@ -134,48 +127,101 @@ export function TradingProvider({ children }) {
     const prevBalance = balance;
     const prevPortfolio = [...portfolio];
 
+    // Optimistic Update
     setBalance(prev => prev - cost);
-    // Optimistic update omitted for brevity but should be here
+    setPortfolio(prev => {
+      const existing = prev.find(p => p.symbol === stock.symbol);
+      if (existing) {
+        return prev.map(p => p.symbol === stock.symbol ? {
+          ...p,
+          quantity: p.quantity + qty,
+          invested: p.invested + cost,
+          currentValue: (p.currentValue || p.invested) + cost
+        } : p);
+      } else {
+        return [...prev, {
+          symbol: stock.symbol,
+          name: stock.name || stock.symbol,
+          buyPrice: price,
+          invested: cost,
+          quantity: qty,
+          market: stock.market || 'US',
+          currentValue: cost,
+          gainVal: 0,
+          gainPct: 0
+        }];
+      }
+    });
     
     try {
-      await executeTrade({
+      const res = await executeTrade({
         portfolioId: activePortfolioId,
         symbol: stock?.symbol,
         quantity: qty,
         price: price,
         type: 'BUY'
       });
+      
+      if (!res.success) throw new Error(res.message || "Trade failed");
+
       setLastAction({ type: 'BUY', symbol: stock?.symbol, timestamp: Date.now() });
       await refreshData();
       return { success: true };
     } catch (err) {
       setBalance(prevBalance);
       setPortfolio(prevPortfolio);
-      return { success: false, error: "Trade failed" };
+      return { success: false, error: err.message || "Trade failed" };
     }
   }, [activePortfolioId, balance, portfolio, refreshData]);
 
   const executeSell = useCallback(async (symbol, currentValue, quantity) => {
     if (!activePortfolioId) return { success: false, error: "No portfolio" };
     const holding = portfolio.find(p => p.symbol === symbol);
+    if (!holding) return { success: false, error: "Holding not found" };
+
     const sellQty = quantity || holding?.quantity || 0;
-    const sellPrice = currentValue / sellQty;
+    if (sellQty <= 0) return { success: false, error: "Invalid quantity" };
+    
+    const sellPrice = (currentValue / sellQty) || 0;
+    const sellValue = currentValue || (sellPrice * sellQty);
+
+    const prevBalance = balance;
+    const prevPortfolio = [...portfolio];
+
+    // Optimistic Update
+    setBalance(prev => prev + sellValue);
+    setPortfolio(prev => {
+      if (holding.quantity <= sellQty) {
+        return prev.filter(p => p.symbol !== symbol);
+      }
+      return prev.map(p => p.symbol === symbol ? {
+        ...p,
+        quantity: p.quantity - sellQty,
+        invested: p.invested * ((p.quantity - sellQty) / p.quantity),
+        currentValue: (p.currentValue || p.invested) - sellValue
+      } : p);
+    });
 
     try {
-      await executeTrade({
+      const res = await executeTrade({
         portfolioId: activePortfolioId,
         symbol: symbol,
         quantity: sellQty,
         price: sellPrice,
         type: 'SELL'
       });
+
+      if (!res.success) throw new Error(res.message || "Sell failed");
+
       setLastAction({ type: 'SELL', symbol, timestamp: Date.now() });
       await refreshData();
       return { success: true };
     } catch (err) {
-      return { success: false, error: "Sell failed" };
+      setBalance(prevBalance);
+      setPortfolio(prevPortfolio);
+      return { success: false, error: err.message || "Sell failed" };
     }
-  }, [activePortfolioId, portfolio, refreshData]);
+  }, [activePortfolioId, balance, portfolio, refreshData]);
 
   const contextValue = useMemo(() => ({
     balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading,

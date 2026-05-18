@@ -22,7 +22,6 @@ const Onboarding = lazy(() => import('./pages/Onboarding'));
 const Decisions = lazy(() => import('./pages/Decisions'));
 const Vault = lazy(() => import('./pages/Vault'));
 const SimpleDashboard = lazy(() => import('./pages/SimpleDashboard'));
-const Admin = lazy(() => import('./pages/Admin'));
 
 import Layout from './components/Layout';
 import { StockPanelProvider } from './context/StockPanelContext';
@@ -87,46 +86,6 @@ function PrivateRoute({ children }: { children: ReactNode }) {
   return token ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
-/**
- * Admin gate. Reads cached `finplay_user.admin` first to avoid a network round
- * trip; falls back to /api/auth/me on first render so a page reload still works.
- * Server is the real authority — this just avoids a 403 flash.
- */
-function AdminRoute({ children }: { children: ReactNode }) {
-  const token = localStorage.getItem('token');
-  const cached = (() => {
-    try { return JSON.parse(localStorage.getItem('finplay_user') || 'null'); }
-    catch { return null; }
-  })();
-
-  // Hooks must be unconditional — read state every render.
-  const [state, setState] = useState<'pending' | 'admin' | 'denied'>(
-    !token ? 'denied' : cached?.admin ? 'admin' : 'pending'
-  );
-
-  useEffect(() => {
-    if (state !== 'pending') return;
-    let cancelled = false;
-    import('./services/api').then(({ fetchMe }) => fetchMe())
-      .then(me => {
-        if (cancelled) return;
-        if (me?.admin) {
-          localStorage.setItem('finplay_user', JSON.stringify(me));
-          setState('admin');
-        } else {
-          setState('denied');
-        }
-      })
-      .catch(() => { if (!cancelled) setState('denied'); });
-    return () => { cancelled = true; };
-  }, [state]);
-
-  if (!token)               return <Navigate to="/login" replace />;
-  if (state === 'pending')  return <LoadingScreen />;
-  if (state === 'admin')    return <>{children}</>;
-  return <Navigate to="/" replace />;
-}
-
 export default function App() {
   const isFirstTime = !localStorage.getItem('finplay_arena_done');
 
@@ -172,9 +131,6 @@ export default function App() {
                     <Route path="/insights" element={<PrivateRoute><Layout><Insights /></Layout></PrivateRoute>} />
                     <Route path="/stock/:symbol" element={<PrivateRoute><Layout><StockDetails /></Layout></PrivateRoute>} />
                     <Route path="/dashboard" element={<PrivateRoute><Layout><Dashboard /></Layout></PrivateRoute>} />
-
-                    {/* Admin console — gated client + server side */}
-                    <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
 
                     {/* Auth (public) */}
                     <Route path="/login" element={<Login />} />

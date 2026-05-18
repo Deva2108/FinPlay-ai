@@ -99,6 +99,14 @@ export default function Portfolio() {
     if (activePortfolioId) fetchMentorAdvice();
   }, [activePortfolioId]);
 
+  const handlePortfolioClick = () => setInsightContent({ type: 'info', title: 'Value Logic', insight: 'Standardized valuation across all assets.' });
+  const handleReturnsClick = () => setInsightContent({ type: 'info', title: 'Performance', insight: 'Returns are calculated based on weighted average buy price.' });
+  const handleRiskClick = () => setInsightContent({ type: 'info', title: 'Risk Analysis', insight: 'Risk level is determined by portfolio diversification and position sizes.' });
+  const handleSell = (e, stock) => {
+    e.stopPropagation();
+    handlePortfolioAction('sell', stock);
+  };
+
   const handlePortfolioStockClick = (stock) => {
     setSelectedPortfolioStock(stock);
     setIsStockPanelOpen(true);
@@ -131,7 +139,7 @@ export default function Portfolio() {
     const totalYield = totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
     const allocation = (calculatedHoldings || []).map(h => ({ name: h.symbol, value: h.currentValue }));
     const portfolioMood = totalYield > 2 ? 'Bullish' : totalYield < -2 ? 'Risky' : 'Mixed';
-    const riskLevel = holdings?.length === 0 ? 'None' : holdings?.length <= 3 ? 'High' : 'Balanced';
+    const riskLevel = calculatedHoldings.length === 0 ? 'None' : calculatedHoldings.length <= 3 ? 'High' : 'Balanced';
     const topStock = (allocation || []).sort((a,b) => b.value - a.value)[0]?.name || '';
 
     return { holdings: calculatedHoldings, totalInvested, totalCurrentValue, totalGain, totalYield, allocation, portfolioMood, riskLevel, topStock };
@@ -153,111 +161,6 @@ export default function Portfolio() {
   }, [totalCurrentValue]);
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-[#020617]"><Loader2 size={40} className="text-blue-500 animate-spin" /></div>;
-
-  if (portfolio.length === 0) return (
-    <div className="min-h-[80vh] flex flex-col items-center justify-center px-6 text-center">
-      <div className="max-w-md w-full space-y-10">
-        <div className="w-32 h-32 bg-slate-900/80 rounded-full flex items-center justify-center border border-slate-800 shadow-2xl mx-auto"><Zap size={48} className="text-slate-700" /></div>
-        <div className="space-y-4">
-          <h2 className="text-4xl font-black text-white uppercase tracking-tighter">Start Your Journey</h2>
-          <p className="text-sm opacity-80 text-slate-400 font-bold uppercase tracking-widest">Available Capital: <span className="text-white font-black">{formatPrice(balance, marketCode)}</span></p>
-        </div>
-        <button onClick={() => navigate('/')} className="w-full bg-white text-slate-950 font-black py-4 rounded-2xl uppercase tracking-widest text-xs shadow-xl flex items-center justify-center gap-4 group">Explore Stocks <ArrowRight size={18} className="group-hover:translate-x-2 transition-transform" /></button>
-      </div>
-    </div>
-  );
-
-  return (
-    <>
-    <InsightPanel isOpen={!!insightContent} onClose={() => setInsightContent(null)} content={insightContent} />
-    <PortfolioStockPanel isOpen={isStockPanelOpen} onClose={() => setIsStockPanelOpen(false)} stock={selectedPortfolioStock} marketCode={marketCode} onAction={handlePortfolioAction} />
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full pb-32 relative">
-      <AnimatePresence>
-        {feedback && (
-          <motion.div initial={{ opacity: 0, y: -20, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }} exit={{ opacity: 0 }} className="fixed top-24 left-1/2 z-[100] px-6 py-3 rounded-full bg-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-2xl border border-white/20 backdrop-blur-md">
-            <Zap size={16} /> {feedback.msg}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-8 sm:py-12">
-        <div className="grid grid-cols-1 lg:grid-cols-10 gap-4 items-start">
-          <div className="lg:col-span-6 flex flex-col gap-6">
-            <div className="p-8 rounded-[2.5rem] bg-slate-900/60 border border-white/5 relative overflow-hidden group">
-               <div className="relative z-10 flex flex-col md:flex-row items-center gap-8">
-                  <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-3xl font-black text-white shadow-2xl">
-                     {loadingArchetype ? <Loader2 className="animate-spin" size={32} /> : (archetype?.title?.charAt(0) || "U")}
-                  </div>
-                  <div className="text-center md:text-left space-y-2">
-                     <div className="flex items-center justify-center md:justify-start gap-3">
-                        <h1 className="text-2xl font-black text-white tracking-tighter uppercase">{loadingArchetype ? "Analyzing..." : (archetype?.title || "Evaluating Style")}</h1>
-                        <div className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/20 rounded-full text-[9px] font-black text-emerald-400 uppercase tracking-widest">Psych Profile</div>
-                     </div>
-                     <p className="text-blue-100/70 font-medium text-sm leading-relaxed">{loadingArchetype ? "Deep-scanning your recent market decisions..." : (archetype?.trait || "Unlock your profile in the Arena.")}</p>
-                  </div>
-               </div>
-            </div>
-
-            <div className="bg-slate-900/40 border border-slate-800 p-6 rounded-[2rem] shadow-2xl backdrop-blur-md" onClick={() => setInsightContent({ type: 'info', title: 'Value Logic', insight: 'Standardized valuation across all assets.' })}>
-              <div className="space-y-4">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Total Portfolio Value</p>
-                <motion.h3 animate={{ color: valueDirection === 'up' ? '#34d399' : valueDirection === 'down' ? '#f43f5e' : '#ffffff' }} className="text-5xl md:text-6xl font-black tracking-tighter">{formatPrice(totalCurrentValue, marketCode)}</motion.h3>
-                <div className="flex flex-wrap items-center gap-6 pt-2">
-                  <div className={`flex items-center gap-2 font-semibold text-xl md:text-2xl ${totalGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {totalGain >= 0 ? <TrendingUp size={20}/> : <TrendingDown size={20}/>}
-                    <span>{totalGain >= 0 ? '+' : ''}{formatPrice(totalGain, marketCode)}</span>
-                  </div>
-                  <span className="text-base font-medium text-slate-500">{totalYield.toFixed(2)}% Returns</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <PortfolioSuggestionCard holdings={holdings} totalYield={totalYield} mentorAdvice={mentorAdvice} loadingMentor={loadingMentor} />
-              <div className="flex flex-col gap-4">
-                {holdings.map((stock) => (
-                  <motion.div key={stock.symbol} onClick={() => handlePortfolioStockClick(stock)} className="bg-slate-900/40 border border-slate-800 rounded-[2rem] p-6 group cursor-pointer">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
-                      <div className="flex items-center gap-5 flex-1">
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-lg border border-white/5 ${stock.status === 'profit' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>{(stock?.symbol || "")[0]}</div>
-                        <div>
-                          <h4 className="text-lg font-semibold text-white group-hover:text-blue-400 transition-colors">{stock.symbol}</h4>
-                          <p className="text-sm opacity-80 text-slate-500">Avg {formatPrice(stock.buyPrice, stock.currency || 'INR')} • {Math.floor(stock.quantity)} Shares</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-lg font-semibold tabular-nums ${stock.status === 'profit' ? 'text-emerald-400' : 'text-rose-400'}`}>{stock.status === 'profit' ? '+' : ''}{formatPrice(stock.gainVal, stock.currency || 'INR')}</p>
-                        <p className={`text-sm font-medium ${stock.status === 'profit' ? 'text-emerald-500' : 'text-rose-500'}`}>{stock.gainPct.toFixed(2)}%</p>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-4 flex flex-col gap-4 h-full">
-            <div className="p-8 rounded-[2rem] bg-[#020617] border border-blue-500/20 shadow-2xl">
-              <div className="space-y-6">
-                <div className="flex items-center gap-3"><div className="p-2.5 bg-blue-600 rounded-xl text-white"><Sparkles size={20} /></div><div><h3 className="text-xl font-black text-white uppercase tracking-tighter">AI Mentor</h3></div></div>
-                <div className="bg-white/5 p-6 rounded-2xl">
-                  {loadingMentor ? <Loader2 size={24} className="animate-spin text-blue-400 mx-auto" /> : <p className="text-sm font-bold leading-relaxed text-blue-100/90 italic">"{mentorAdvice || "Analysis in progress..."}"</p>}
-                </div>
-              </div>
-            </div>
-            <MicroLearningCard insight={adaptiveInsight} />
-            <div className="p-6 rounded-[2rem] bg-gradient-to-br from-[#0f172a] to-[#1e293b] border border-white/5">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Available Capital</p>
-              <p className="text-3xl font-black text-white mb-4">{formatPrice(balance, marketCode)}</p>
-              <button onClick={() => navigate('/')} className="w-full py-4 bg-white text-slate-900 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all flex items-center justify-center gap-2">Find Opportunities <ChevronRight size={14} /></button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-    </>
-  );
-}
 
   if (portfolio.length === 0) return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="min-h-[80vh] flex flex-col items-center justify-center px-6 relative overflow-hidden text-center">

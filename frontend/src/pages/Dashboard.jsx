@@ -101,10 +101,14 @@ export default function Dashboard() {
       setTrending(trendingRes?.data || []);
       setFamousInsights(famousRes?.data || []);
       setWatchlist(watchlistRes?.data || []);
-      setSyncingMarket([indicesRes, trendingRes, famousRes, watchlistRes].some(res => res?.meta?.status === "SYNCING"));
+      
+      const isSyncing = [indicesRes, trendingRes, famousRes, watchlistRes].some(res => res?.syncing);
+      setSyncingMarket(isSyncing);
+      if (isSyncing) setLoadingMarket(true);
+      else setLoadingMarket(false);
+      
     } catch (err) {
       console.error("Market data fetch failed", err);
-    } finally {
       setLoadingMarket(false);
     }
   };
@@ -159,7 +163,7 @@ export default function Dashboard() {
     try {
       const res = await searchStocks(debouncedSearch);
       setSearchResults(res?.data || []);
-      setIsSearching(res?.meta?.status === "SYNCING");
+      setIsSearching(!!res?.syncing);
     } catch (err) {
       setSearchResults([]);
       setIsSearching(false);

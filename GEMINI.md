@@ -1,227 +1,183 @@
-## 🚀 PRODUCT VISION — FINPLAY
+# 🔧 FinPlay Runtime & Testing Instructions
 
-FinPlay is not a stock dashboard.
+## Objective
 
-It is a:
-
-* Learning system
-* Decision engine
-* Behavior-driven investing simulator
-
-Built to help users **understand, practice, and internalize financial thinking** before risking real money.
+Ensure the backend runs correctly, all APIs respond, and fallback mechanisms behave safely when API keys are missing.
 
 ---
 
-## 🧠 CORE PRINCIPLE
+## 1. Build & Run Backend
 
-**Learn → Decide → See Outcome → Improve → Repeat**
+Run from project root:
 
-FinPlay is designed around **experience-based learning**, not passive information.
+```bash
+./mvnw -DskipTests compile
+./mvnw spring-boot:run
+```
 
-We follow familiar UX patterns from platforms like Groww and INDmoney for usability,
-but innovate where it matters:
+Expected logs:
 
-* Decision-making experience
-* Real-time feedback loops
-* Contextual financial learning
-* Personalized insights
+* "Started Application"
+* "Tomcat started on port 8080"
 
----
-
-## 🎯 PROBLEM WE SOLVE
-
-Most beginners:
-
-* Don’t understand financial concepts in real-world context
-* Feel overwhelmed by traditional investing apps
-* Learn only after making costly mistakes
-* Lack confidence to start
+If this appears → backend is running.
 
 ---
 
-## 💡 OUR SOLUTION
+## 2. Health Check
 
-FinPlay transforms investing into a **guided, interactive learning experience**.
+Test server:
 
----
+GET http://localhost:8080/actuator/health
 
-### 1️⃣ 🎮 DECISION ARENA (CORE SYSTEM)
+Expected:
 
-Users don’t just view data — they make decisions.
-
-Actions:
-
-* Buy
-* Sell
-* Hold
-* Watchlist
-
-Each decision:
-
-* Has a reason
-* Leads to an outcome
-* Builds intuition over time
-
-👉 Learning happens through **feedback, not theory**
+```json
+{
+  "status": "UP"
+}
+```
 
 ---
 
-### 2️⃣ 📊 MARKET UNDERSTANDING SYSTEM
+## 3. API Testing
 
-Every market element is interactive.
+### 3.1 Insight API (AI / fallback)
 
-Example:
+GET /api/insight?query=tesla
 
-* Click NIFTY / SENSEX →
+Expected:
 
-  * See trend (chart)
-  * Understand why it moved
-  * Learn what it means for you
+* If GROQ/Gemini key present → structured AI JSON
+* If missing →
 
-👉 Data is always translated into **actionable understanding**
-
----
-
-### 3️⃣ 🧠 PERSONALIZED INTELLIGENCE
-
-The system adapts to the user.
-
-Instead of generic insights, users see:
-
-* Portfolio risk exposure
-* Sector concentration
-* Missed opportunities
-* Suggested next actions
-
-👉 The app behaves like a **financial guide, not a dashboard**
+```json
+{
+  "status": "SYNCING",
+  "message": "Insight is being prepared"
+}
+```
 
 ---
 
-### 4️⃣ 🎓 INTERACTIVE LEARNING SYSTEM (INFO BUTTON)
+### 3.2 Portfolio API
 
-Every key concept is explainable instantly.
+GET /api/portfolio
 
-Tap ( i ) anywhere to learn:
+Expected:
 
-* Simple definition
-* Real-life analogy
-* Context in your portfolio
-
-Example:
-Stop Loss →
-
-* “Auto-exit to limit losses”
-* “Like leaving a bad deal early”
-* “In your portfolio, this would have saved ₹X”
-
-👉 Finance is taught **inside the experience**, not separately
+* Portfolio data derived from internal transaction history and live market rates.
+* Without data -> fallback syncing response
 
 ---
 
-### 5️⃣ 🔁 BEHAVIOR & FEEDBACK LOOP
+### 3.3 Forex API
 
-The system tracks:
+GET /api/forex?from=USD&to=INR
 
-* User decisions
-* Patterns
-* Mistakes
+Expected:
 
-And responds with:
-
-* Outcome feedback
-* Improvement suggestions
-* Confidence-building insights
-
-👉 Users don’t just learn markets
-👉 They learn **how they behave in markets**
+* Live rate OR cached fallback
 
 ---
 
-### 6️⃣ 💰 SAFE SIMULATION ENVIRONMENT
+### 3.4 Content API (YouTube)
 
-* No real money risk
-* Realistic market scenarios
-* Learn compounding through experience
+GET /api/content
 
-👉 Build confidence before entering real markets
+Expected:
 
----
-
-## 🧬 WHAT MAKES FINPLAY DIFFERENT
-
-Traditional apps:
-
-* Show data
-* Assume knowledge
-* Focus on execution
-
-FinPlay:
-
-* Teaches thinking
-* Builds intuition
-* Simulates decision-making
+* With API key → real videos
+* Without → fallback mock content
 
 ---
 
-## 🎯 TARGET AUDIENCE
+## 4. System Behavior Rules
 
-Primary:
+The system MUST:
 
-* Students
-* Beginners
-* First-time investors
-
-Secondary:
-
-* Adults who never learned investing
-* Parents teaching financial literacy
+* Never crash if API keys are missing
+* Always return a valid JSON response
+* Use "SYNCING" state when data is unavailable
+* Never block user requests
+* Always rely on Redis cache if available
 
 ---
 
-## 🌱 OUR MISSION
+## 5. Failure Handling
 
-> To make financial intelligence intuitive, accessible, and practical from an early age.
+If API fails:
 
----
+* Return cached data if present
+* Otherwise return:
 
-## 🧠 FINANCIAL MINDSET FIRST
-
-We don’t optimize for quick profits.
-
-We optimize for:
-
-* Long-term thinking
-* Risk awareness
-* Decision quality
-* Understanding compounding
+```json
+{
+  "status": "SYNCING",
+  "source": "fallback"
+}
+```
 
 ---
 
-## 🌍 REAL-WORLD IMPACT
+## 6. Validation Checklist
 
-Users who engage with FinPlay:
+System is considered correct if:
 
-* Develop financial intuition
-* Understand risk vs reward
-* Build confidence before real investing
-
----
-
-## 🚀 LONG-TERM VISION
-
-> FinPlay becomes the Duolingo of Investing.
-
-A system where users don’t just track money…
-
-They learn how to:
-
-* Think
-* Decide
-* Grow wealth
+* Backend starts without errors
+* Health endpoint returns UP
+* All APIs respond (even fallback)
+* No null or empty responses
+*   Logs show graceful warnings (not crashes)
+*   **Resilience4j** handles all external API calls with declarative circuit breakers and rate limiters for seamless fallbacks.
+*   **Deep Caching Architecture:** Uses a multi-level strategy:
+    *   **L1 (Caffeine):** 30s In-Memory cache for ultra-hot data (indices, forex).
+    *   **L2 (Redis):** Distributed cache for consistent data across nodes.
+    *   **Tiered TTLs:** 5m (Hot Quotes), 1h (News/Charts), 2h (AI Insights).
+    *   **Persistent Fallback:** 24h "Last Close" snapshots for 100% off-hours availability.
 
 ---
 
-## 🎯 CORE IDEA
 
-> When users experience how money works,
-> they don’t just learn finance — they understand it for life.
+## 7. Recommended Testing Tool
+
+Use Postman or curl for testing endpoints.
+
+---
+
+## 8. Common Issues
+
+Port already in use:
+
+```bash
+lsof -i :8080
+kill -9 <pid>
+```
+
+Env not loaded:
+Ensure variables are exported or available in runtime.
+
+---
+
+## 9. Next Phase Trigger
+
+Once all endpoints respond correctly:
+
+Proceed to frontend integration:
+
+* Insights polling hook
+* Vault page
+* Portfolio UI
+* Forex conversion display
+
+---
+
+## Important
+
+This system is designed to simulate real-time behavior using:
+
+* Scheduler-based hydration
+* Redis caching
+* Safe fallback states
+
+Do NOT modify this architecture.

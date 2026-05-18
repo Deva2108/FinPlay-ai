@@ -1,5 +1,6 @@
 package com.example.stockPortfolio.MarketManagement;
 
+import com.example.stockPortfolio.HoldingsManagement.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
@@ -14,8 +15,9 @@ public class FinnhubService {
 
     private final ExternalMarketDataGateway externalMarketDataGateway;
 
-    public Map<String, Object> getStockQuote(String symbol) {
-        return externalMarketDataGateway.fetchQuoteWithFallback(symbol);
+    public ApiResponse<Map<String, Object>> getStockQuote(String symbol) {
+        Map<String, Object> quote = externalMarketDataGateway.fetchQuoteWithFallback(symbol);
+        return ApiResponse.ok(quote, "Stock quote fetched successfully");
     }
 
     public List<Map<String, Object>> getCompanyNews(String symbol) {

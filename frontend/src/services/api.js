@@ -18,7 +18,6 @@ export const API_ENDPOINTS = {
   PORTFOLIO: {
     BASE: '/api/portfolios',
     BALANCE: (id) => `/api/portfolios/${id}/balance`,
-    GAME_RESULT: (id) => `/api/portfolios/${id}/game-result`,
     MENTOR: (id) => `/api/portfolios/${id}/mentor`,
   },
   HOLDINGS: {
@@ -106,31 +105,25 @@ api.interceptors.response.use(
  * Returns ONLY the 'data' field to maintain backward compatibility with components.
  */
 export const unwrapApiResponse = (response) => {
-  if (!response || !response.data) return null;
-  
-  // If backend returns the standardized ApiResponse
-  if (response.data.success !== undefined) {
-    return response.data.data;
-  }
-  
-  // Fallback for non-standardized or legacy responses
-  return response.data;
+  const res = response?.data;
+  if (!res) return { error: true, message: "Network Error" };
+
+  if (res.success) return res.data;
+  return { error: true, message: res.message || "Request failed" };
 };
 
 /**
  * Returns the FULL envelope {success, data, meta} for components that need to check meta.status
  */
 export const unwrapEnvelope = (response) => {
-  if (!response || !response.data) return { success: false, data: null, meta: { status: 'ERROR' } };
-  
-  if (response.data.success !== undefined) {
-    return response.data;
-  }
-  
+  const res = response?.data;
+  if (!res) return { success: false, error: true, message: "Network Error" };
+
   return {
-    success: true,
-    data: response.data,
-    meta: { status: 'OK', source: 'legacy' }
+    success: res.success,
+    data: res.data,
+    meta: res.meta,
+    message: res.message
   };
 };
 
@@ -191,11 +184,6 @@ export const createPortfolio = async (name) => {
 
 export const updatePortfolioBalance = async (portfolioId, amount) => {
   const response = await api.post(API_ENDPOINTS.PORTFOLIO.BALANCE(portfolioId), { amount });
-  return readApiEnvelope(response);
-};
-
-export const recordGameResult = async (portfolioId, amount) => {
-  const response = await api.post(API_ENDPOINTS.PORTFOLIO.GAME_RESULT(portfolioId), { amount });
   return readApiEnvelope(response);
 };
 
@@ -398,35 +386,3 @@ export const getVaultCards = async () => {
   const response = await api.get(API_ENDPOINTS.VAULT.CARDS);
   return readApiEnvelope(response);
 };
-
-// ============================================================
-//   Admin API (gated server-side by ROLE_ADMIN — env ADMIN_EMAILS)
-// ============================================================
-
-export const ADMIN_ENDPOINTS = {
-  ME:            '/api/auth/me',
-  USERS:         '/api/admin/users',
-  USER:          (id) => `/api/admin/users/${id}`,
-  USER_RESET:    (id) => `/api/admin/users/${id}/reset`,
-  USER_DISABLE:  (id) => `/api/admin/users/${id}/disable`,
-  USER_ENABLE:   (id) => `/api/admin/users/${id}/enable`,
-  USER_PWD:      (id) => `/api/admin/users/${id}/reset-password`,
-  USER_BALANCE:  (id) => `/api/admin/users/${id}/balance`,
-  LEADERBOARD:   '/api/admin/leaderboard',
-  EVENT_BONUS:   '/api/admin/event/bonus',
-  STATS:         '/api/admin/stats',
-  AUDIT:         '/api/admin/audit',
-};
-
-export const fetchMe              = ()       => api.get(ADMIN_ENDPOINTS.ME).then(readApiEnvelope);
-export const adminListUsers       = ()       => api.get(ADMIN_ENDPOINTS.USERS).then(readApiEnvelope);
-export const adminGetUser         = (id)     => api.get(ADMIN_ENDPOINTS.USER(id)).then(readApiEnvelope);
-export const adminResetUser       = (id)     => api.post(ADMIN_ENDPOINTS.USER_RESET(id)).then(readApiEnvelope);
-export const adminDisableUser     = (id)     => api.post(ADMIN_ENDPOINTS.USER_DISABLE(id)).then(readApiEnvelope);
-export const adminEnableUser      = (id)     => api.post(ADMIN_ENDPOINTS.USER_ENABLE(id)).then(readApiEnvelope);
-export const adminResetPassword   = (id)     => api.post(ADMIN_ENDPOINTS.USER_PWD(id)).then(readApiEnvelope);
-export const adminAdjustBalance   = (id, b)  => api.post(ADMIN_ENDPOINTS.USER_BALANCE(id), b).then(readApiEnvelope);
-export const adminLeaderboard     = ()       => api.get(ADMIN_ENDPOINTS.LEADERBOARD).then(readApiEnvelope);
-export const adminBonusEvent      = (b)      => api.post(ADMIN_ENDPOINTS.EVENT_BONUS, b).then(readApiEnvelope);
-export const adminStats           = ()       => api.get(ADMIN_ENDPOINTS.STATS).then(readApiEnvelope);
-export const adminAudit           = (limit=100) => api.get(ADMIN_ENDPOINTS.AUDIT, { params: { limit } }).then(readApiEnvelope);

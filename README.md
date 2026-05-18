@@ -7,8 +7,8 @@ FinPlay is a learning-driven stock portfolio simulator with an AI mentor.
 ### 1. Environment Setup
 Create a `.env` file in the root directory using `.env.example` as a template:
 ```bash
-cp .env.example .env
-# Open .env and fill in your actual API keys and secrets
+cp ..env.example ..env
+# Open ..env and fill in your actual API keys and secrets
 ```
 
 ### 2. Run with Docker (Recommended)
@@ -24,7 +24,7 @@ This will start:
 ### 3. Manual Backend Run
 Requirements: Java 17+, Maven
 ```bash
-# Load env variables or set them in your IDE
+# Load .env variables or set them in your IDE
 mvn spring-boot:run
 ```
 
@@ -33,7 +33,7 @@ Requirements: Node.js 18+
 ```bash
 cd frontend
 npm install
-# Create a frontend/.env.local file
+# Create a frontend/..env.local file
 # VITE_API_URL=http://localhost:8080
 npm run dev
 ```

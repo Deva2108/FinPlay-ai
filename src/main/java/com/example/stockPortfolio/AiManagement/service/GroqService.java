@@ -31,7 +31,7 @@ public class GroqService {
         String raw = groqGateway.generateWithSchema(prompt, InsightSchema.JSON_SCHEMA);
         if (raw == null) {
             log.warn("Groq returned no payload for topic '{}'", topic);
-            return null;
+            return new RichInsightDTO();
         }
         try {
             return validator.parseStrict(raw);

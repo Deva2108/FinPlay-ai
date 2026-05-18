@@ -235,9 +235,9 @@ public class MarketGateway {
 
         Map<String, Map<String, Object>> results = new HashMap<>();
         for (String s : symbols) {
-            Map<String, Object> quote = getStockQuote(s);
-            if (quote != null) {
-                results.put(s, quote);
+            ApiResponse<Map<String, Object>> quoteResp = getStockQuote(s);
+            if (quoteResp != null && quoteResp.getData() != null) {
+                results.put(s, quoteResp.getData());
             }
         }
         return results;
@@ -245,12 +245,12 @@ public class MarketGateway {
     /**
      * Reads stock data directly from Redis as a Map.
      */
-    public Map<String, Object> getStockQuote(String symbol) {
-        com.example.stockPortfolio.HoldingsManagement.ApiResponse<Map<String, Object>> response = getLatestQuote(symbol);
-        if (response != null && response.isSuccess()) {
-            return response.getData();
+    public ApiResponse<Map<String, Object>> getStockQuote(String symbol) {
+        ApiResponse<Map<String, Object>> response = getLatestQuote(symbol);
+        if (response != null) {
+            return response;
         }
-        return null;
+        return ApiResponse.syncing(Collections.emptyMap(), "Data unavailable", "fallback");
     }
 
     private final ExternalMarketDataGateway externalMarketDataGateway;
@@ -470,19 +470,26 @@ public class MarketGateway {
     /**
      * Reads financial metrics from Redis.
      */
-    public Map<String, Object> getFinancials(String symbol) {
+    public ApiResponse<Map<String, Object>> getFinancials(String symbol) {
         String normalized = normalizeSymbol(symbol);
-        if (normalized == null) return Collections.emptyMap();
-        
+        if (normalized == null) {
+            return ApiResponse.syncing(Collections.emptyMap(), "Unsupported symbol", "fallback");
+        }
+
         try {
             Object data = redisTemplate.opsForValue().get(FINANCIALS_KEY_PREFIX + normalized);
             if (data instanceof Map) {
-                return (Map<String, Object>) data;
+                return ApiResponse.ok((Map<String, Object>) data, ApiResponse.Meta.builder()
+                        .status("OK")
+                        .message("Financials fetched from cache")
+                        .source("cache")
+                        .lastUpdated(LocalDateTime.now())
+                        .build());
             }
         } catch (Exception e) {
             log.error("Redis Financials Read Error for {}: {}", symbol, e.getMessage());
         }
-        return Collections.emptyMap();
+        return ApiResponse.syncing(Collections.emptyMap(), "Financials syncing...", "fallback");
     }
 
     /**

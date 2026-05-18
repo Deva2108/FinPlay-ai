@@ -1,0 +1,32 @@
+# Build output
+dist/
+build/
+
+# Dependencies (re-installed in the image)
+node_modules/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+build.log
+frontend.log
+npm-debug.log*
+
+# VCS / IDE
+.git/
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests / coverage (not needed in production image)
+coverage/
+**/__tests__/
+**/*.test.*
+**/*.spec.*

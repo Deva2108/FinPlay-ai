@@ -1,0 +1,55 @@
+# --- Build output ---
+target/
+**/target/
+*.jar
+*.war
+*.ear
+*.class
+
+# --- Frontend (built separately) ---
+frontend/
+!frontend/.dockerignore
+
+# --- VCS & IDE ---
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+.settings/
+.classpath
+.factorypath
+.project
+*.iml
+
+# --- Logs & ad-hoc artifacts ---
+*.log
+*.txt
+backend.log
+backend_audit.log
+backend_check.log
+boot.log
+final_check.log
+spring_log*.txt
+spring_log*.log
+chart_output.json
+register_res.txt
+register_test.js
+full_content.js
+login_response.json
+xy/
+
+# --- Docs (not needed in image) ---
+*.md
+!README.md
+!CLAUDE.md
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+
+# --- Misc ---
+frontend/node_modules/
+node_modules/
+dist/
+*.swp
