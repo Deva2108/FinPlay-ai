@@ -33,7 +33,9 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(jwtAuthenticationEntryPoint))
                 .authorizeHttpRequests(auth -> auth
-                        // Public auth endpoints. `/api/auth/me` is intentionally NOT here —
+                        // 1. ALWAYS permit OPTIONS for CORS preflight
+                        .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
+                        // 2. Public auth endpoints. `/api/auth/me` is intentionally NOT here —
                         // it needs the authentication context to identify the caller.
                         .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
                         .requestMatchers("/admin/**", "/api/admin/**").hasRole("ADMIN")
