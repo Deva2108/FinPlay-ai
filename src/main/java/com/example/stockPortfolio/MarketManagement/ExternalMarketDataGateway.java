@@ -453,20 +453,29 @@ public class ExternalMarketDataGateway {
 
     /**
      * Fetches quotes for multiple symbols in a single API call (Batch).
-     * Twelve Data supports up to 25-50 symbols per call. We chunk them for safety.
+     * Free-tier safe: max 1 chunk of 8 symbols per invocation = max 8 credits per call.
+     * Caller (MarketDataScheduler) is responsible for capping the symbol list at 6
+     * before calling this method (TWELVEDATA_CYCLE_LIMIT).
      */
     public Map<String, Map<String, Object>> fetchTwelveDataBatch(List<String> symbols) {
         if (twelveDataApiKey == null || twelveDataApiKey.isBlank() || symbols == null || symbols.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        // 1. Resolve and Normalize symbols
+        // 1. Resolve and Normalize symbols, skipping any that are already fresh in Redis.
+        // Defense-in-depth: the scheduler pre-filters, but this guard ensures we never
+        // issue a TwelveData credit for a symbol whose data is still within the freshness window.
         Map<String, String> reverseMap = new HashMap<>(); // TwelveSymbol -> OurNormalizedSymbol
         List<String> resolvedSymbols = new ArrayList<>();
 
         for (String s : symbols) {
             String normalized = symbolNormalizer.normalize(s);
             if (normalized == null) continue;
+
+            if (isFresh(normalized)) {
+                log.debug("Batch freshness guard: {} is still fresh, skipping TwelveData credit", normalized);
+                continue;
+            }
 
             String twelveSymbol = SYMBOL_OVERRIDE_MAP.get(normalized);
             if (twelveSymbol == null) {
@@ -476,16 +485,22 @@ public class ExternalMarketDataGateway {
             reverseMap.put(twelveSymbol, normalized);
         }
 
-        // 2. Fetch in chunks of 25 (Safe limit for Twelve Data Free Tier)
+        if (resolvedSymbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        // 2. Fetch in chunks of 8 (hard cap per free-tier: 8 credits/min).
+        // Max 1 chunk per invocation so a single scheduler cycle never exceeds 8 credits.
         Map<String, Map<String, Object>> allResults = new HashMap<>();
         int requestCount = 0;
-        for (int i = 0; i < resolvedSymbols.size(); i += 25) {
-            if (requestCount >= 5) { // Safety limit: don't burst too many calls in one scheduler cycle
-                log.warn("Twelve Data Batch quota safeguard: limiting to 5 chunks per cycle");
+        for (int i = 0; i < resolvedSymbols.size(); i += 8) {
+            if (requestCount >= 1) {
+                log.warn("TwelveData batch quota guard: capping at 1 chunk per cycle ({} symbols skipped).",
+                        resolvedSymbols.size() - i);
                 break;
             }
-            
-            List<String> chunk = resolvedSymbols.subList(i, Math.min(i + 25, resolvedSymbols.size()));
+
+            List<String> chunk = resolvedSymbols.subList(i, Math.min(i + 8, resolvedSymbols.size()));
             String batchString = String.join(",", chunk);
 
             String url = UriComponentsBuilder.fromHttpUrl(twelveDataBaseUrl + "/quote")

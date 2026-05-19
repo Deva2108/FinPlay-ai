@@ -40,6 +40,10 @@ public class MarketDataScheduler {
     private static final int CHART_UPDATE_FREQUENCY = 5;
     private static final int BATCH_SIZE = 12;
 
+    // TwelveData free tier: 8 credits/min, 1 credit per symbol even in batch calls.
+    // Keep cycle limit at 6 to leave headroom for urgent symbols without breaching quota.
+    private static final int TWELVEDATA_CYCLE_LIMIT = 6;
+
     public MarketDataScheduler(FinnhubService finnhubService, NewsApiService newsApiService, 
                                MarketGateway marketGateway, 
                                SymbolNormalizer symbolNormalizer, 
@@ -164,7 +168,9 @@ public class MarketDataScheduler {
         });
 
         // 2. APPLY BATCH ROTATION
-        int batchSize = 10;
+        // Keep rotation window at TWELVEDATA_CYCLE_LIMIT so that steady-state
+        // refresh rate (symbols/min) stays within the TwelveData free-tier quota.
+        int batchSize = TWELVEDATA_CYCLE_LIMIT;
         int remainingSlots = batchSize - targets.size();
         
         if (remainingSlots > 0 && !allSymbols.isEmpty()) {
@@ -177,23 +183,33 @@ public class MarketDataScheduler {
             normalIndex = endIndex;
         }
 
-        // Skip symbols whose Redis data is still within the 10-minute freshness window,
-        // unless they are urgent (user is actively viewing them).
+        // Skip symbols whose Redis data is still within the 10-minute freshness window.
+        // Urgent symbols are also skipped if updated within the last 60 seconds to
+        // prevent burning TwelveData credits on data that is still effectively live.
         List<String> symbolsToFetch = targets.stream()
-                .filter(s -> urgentSymbols.contains(s) || !marketGateway.isFresh(s))
+                .filter(s -> !marketGateway.isFresh(s))
                 .collect(Collectors.toList());
         if (symbolsToFetch.isEmpty()) return;
 
-        log.info("Starting batch market hydration for {} symbols ({} skipped as fresh)...",
-                symbolsToFetch.size(), targets.size() - symbolsToFetch.size());
+        // Hard quota cap: only pass up to TWELVEDATA_CYCLE_LIMIT symbols to the TwelveData
+        // batch. Urgent symbols are sorted first in symbolsToFetch, so they get priority
+        // within the cap. Symbols beyond the cap are deferred to the next 60-second cycle
+        // or served by Yahoo Finance via the individual fallback chain below.
+        List<String> batchedSymbols = symbolsToFetch.size() > TWELVEDATA_CYCLE_LIMIT
+                ? symbolsToFetch.subList(0, TWELVEDATA_CYCLE_LIMIT)
+                : symbolsToFetch;
+
+        log.info("Market hydration: {} stale symbols ({} capped for TwelveData batch, {} deferred).",
+                symbolsToFetch.size(), batchedSymbols.size(), symbolsToFetch.size() - batchedSymbols.size());
 
         try {
-            // 3. FETCH & UPDATE MIRROR
-            Map<String, Map<String, Object>> quotes = externalMarketDataGateway.fetchTwelveDataBatch(symbolsToFetch);
-            
-            // 4. FALLBACK: If batch returns nothing (limits/outage), try individual fallback chain
+            // 3. FETCH & UPDATE MIRROR via TwelveData batch (quota-capped list)
+            Map<String, Map<String, Object>> quotes = externalMarketDataGateway.fetchTwelveDataBatch(batchedSymbols);
+
+            // 4. FALLBACK: If batch returns nothing (429/outage), try individual Yahoo-first
+            // chain for all stale symbols — Yahoo is free and does not consume TwelveData credits.
             if (quotes.isEmpty()) {
-                log.info("Batch fetch returned 0 results. Falling back to individual provider chain.");
+                log.info("Batch fetch returned 0 results. Falling back to individual provider chain for all {} stale symbols.", symbolsToFetch.size());
                 for (String s : symbolsToFetch) {
                     Map<String, Object> q = externalMarketDataGateway.fetchQuoteWithFallback(s);
                     if (q != null) marketGateway.updateMirror(s, q);
@@ -201,7 +217,7 @@ public class MarketDataScheduler {
             } else {
                 quotes.forEach(marketGateway::updateMirror);
             }
-            
+
             // 5. CLEANUP
             marketGateway.clearPrioritySymbols(symbolsToFetch);
             log.info("Successfully updated mirror for {} symbols.", Math.max(quotes.size(), 0));
