@@ -22,6 +22,7 @@ export function TradingProvider({ children }) {
   });
   const [gameImpact, setGameImpact] = useState({ amount: 0, type: null, timestamp: null });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const refreshInsights = useCallback(async () => {
     const token = localStorage.getItem('token');
@@ -41,7 +42,8 @@ export function TradingProvider({ children }) {
       setLoading(false);
       return;
     }
-    
+
+    setError(null);
     try {
       const res = await getUserPortfolios();
       const portfolioList = res?.data;
@@ -72,6 +74,7 @@ export function TradingProvider({ children }) {
       await refreshInsights();
     } catch (error) {
       console.error("Failed to fetch trading data", error);
+      setError('Failed to load portfolio data.');
     } finally {
       setLoading(false);
     }
@@ -224,9 +227,9 @@ export function TradingProvider({ children }) {
   }, [activePortfolioId, balance, portfolio, refreshData]);
 
   const contextValue = useMemo(() => ({
-    balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading,
+    balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading, error,
     executeBuy, executeSell, recordDecision, addMissedOpportunity, recordGameResult: syncGameResult, refreshData, refreshInsights, activePortfolioId
-  }), [balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading, executeBuy, executeSell, recordDecision, addMissedOpportunity, syncGameResult, refreshData, refreshInsights, activePortfolioId]);
+  }), [balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading, error, executeBuy, executeSell, recordDecision, addMissedOpportunity, syncGameResult, refreshData, refreshInsights, activePortfolioId]);
 
   return <TradingContext.Provider value={contextValue}>{children}</TradingContext.Provider>;
 }

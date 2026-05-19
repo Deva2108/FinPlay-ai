@@ -29,7 +29,7 @@ import NextEdgeCard from '../components/NextEdgeCard';
 export default function Dashboard() {
   const { openStockPanel, recentlyViewed: allRecentlyViewed } = useStockPanel();
   const { marketMode, marketCode, setMarketMode } = useMarket();
-  const { balance, recordDecision, decisions: allDecisions, activePortfolioId, missedOpportunities: allMissed } = useTrading();
+  const { balance, recordDecision, decisions: allDecisions, activePortfolioId, missedOpportunities: allMissed, loading: portfolioLoading } = useTrading();
 
   const [indices, setIndices] = useState([]);
   const [trending, setTrending] = useState([]);
@@ -91,22 +91,25 @@ export default function Dashboard() {
 
   const fetchMarketData = async () => {
     try {
-      const [indicesRes, trendingRes, famousRes, watchlistRes] = await Promise.all([
-        getIndices(marketMode),
+      // Load indices first — most visible, clears the loading state early
+      const indicesRes = await getIndices(marketMode);
+      setIndices(indicesRes?.data || []);
+      setLoadingMarket(false);
+
+      // Secondary requests after the critical path is unblocked
+      const [trendingRes, famousRes, watchlistRes] = await Promise.all([
         getTrending(),
         getFamousInsights("ALL"),
         getWatchlist()
       ]);
-      setIndices(indicesRes?.data || []);
       setTrending(trendingRes?.data || []);
       setFamousInsights(famousRes?.data || []);
       setWatchlist(watchlistRes?.data || []);
-      
+
       const isSyncing = [indicesRes, trendingRes, famousRes, watchlistRes].some(res => res?.syncing);
       setSyncingMarket(isSyncing);
       if (isSyncing) setLoadingMarket(true);
-      else setLoadingMarket(false);
-      
+
     } catch (err) {
       console.error("Market data fetch failed", err);
       setLoadingMarket(false);
@@ -129,10 +132,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchMarketData();
-    fetchPulse();
+    if (!portfolioLoading) fetchPulse();
     const poll = setInterval(() => { fetchMarketData(); fetchPulse(); }, 1800000);
     return () => clearInterval(poll);
-  }, [marketMode, activePortfolioId]);
+  }, [marketMode, activePortfolioId, portfolioLoading]);
 
   const recentlyViewed = useMemo(() => (allRecentlyViewed || []).filter(s => s?.market === marketCode), [allRecentlyViewed, marketCode]);
   const decisions = useMemo(() => (allDecisions || []).filter(d => d && d.stock && (d.stock.currency === (marketCode === 'IN' ? 'INR' : 'INR'))), [allDecisions, marketCode]);
