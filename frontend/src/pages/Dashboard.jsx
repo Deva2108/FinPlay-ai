@@ -91,12 +91,15 @@ export default function Dashboard() {
 
   const fetchMarketData = async () => {
     try {
-      // Load indices first — most visible, clears the loading state early
+      // Critical path: indices first
       const indicesRes = await getIndices(marketMode);
       setIndices(indicesRes?.data || []);
       setLoadingMarket(false);
 
-      // Secondary requests after the critical path is unblocked
+      // Critical path: pulse (guarded internally by activePortfolioId check)
+      await fetchPulse();
+
+      // Secondary: safe to run in parallel after critical data is ready
       const [trendingRes, famousRes, watchlistRes] = await Promise.all([
         getTrending(),
         getFamousInsights("ALL"),
@@ -131,9 +134,8 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    fetchMarketData();
-    if (!portfolioLoading) fetchPulse();
-    const poll = setInterval(() => { fetchMarketData(); fetchPulse(); }, 1800000);
+    fetchMarketData(); // fetchPulse is called inside after indices are ready
+    const poll = setInterval(() => fetchMarketData(), 1800000);
     return () => clearInterval(poll);
   }, [marketMode, activePortfolioId, portfolioLoading]);
 

@@ -90,7 +90,7 @@ public class MarketDataScheduler {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.example.stockPortfolio.ContentManagement.ContentService contentService;
 
-    @Scheduled(fixedRate = 1800000) // 30 minutes
+    @Scheduled(fixedRate = 1800000, initialDelay = 60000) // first run 60 s after startup
     public void precomputeAiInsights() {
         log.info("Starting AI Insight precomputation cycle...");
         for (String marketType : List.of("INDIA", "US")) {
@@ -129,7 +129,7 @@ public class MarketDataScheduler {
         }
     }
 
-    @Scheduled(fixedRate = 60000) // 1 minute
+    @Scheduled(fixedRate = 60000, initialDelay = 30000) // first run 30 s after startup
     public void hydrateMarketMirror() {
         Set<String> urgentSymbols = marketGateway.getPrioritySymbols();
         boolean marketOpen = marketStatusService.isAnyMarketOpen();
@@ -177,10 +177,15 @@ public class MarketDataScheduler {
             normalIndex = endIndex;
         }
 
-        List<String> symbolsToFetch = new ArrayList<>(targets);
+        // Skip symbols whose Redis data is still within the 10-minute freshness window,
+        // unless they are urgent (user is actively viewing them).
+        List<String> symbolsToFetch = targets.stream()
+                .filter(s -> urgentSymbols.contains(s) || !marketGateway.isFresh(s))
+                .collect(Collectors.toList());
         if (symbolsToFetch.isEmpty()) return;
 
-        log.info("Starting batch market hydration for {} symbols...", symbolsToFetch.size());
+        log.info("Starting batch market hydration for {} symbols ({} skipped as fresh)...",
+                symbolsToFetch.size(), targets.size() - symbolsToFetch.size());
 
         try {
             // 3. FETCH & UPDATE MIRROR
