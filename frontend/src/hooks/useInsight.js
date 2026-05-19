@@ -38,8 +38,15 @@ export function useInsight(endpoint, params = {}, options = {}) {
         timer = setTimeout(poll, 3000);
       } catch (err) {
         if (!isActive) return;
-        setError(err.message);
-        setStatus('ERROR');
+        // Transient failure (timeout/network) — retry instead of permanently stopping
+        const isTransient = !err.response;
+        if (isTransient && pollCount.current < maxPolls) {
+          pollCount.current += 1;
+          timer = setTimeout(poll, 5000);
+        } else {
+          setError(err.message);
+          setStatus('ERROR');
+        }
       }
     };
 

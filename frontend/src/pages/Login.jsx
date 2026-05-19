@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
 import { loginUser } from '../services/api';
+import { useTrading } from '../context/TradingContext';
 import { Zap } from 'lucide-react';
 
 export default function Login() {
@@ -10,6 +11,7 @@ export default function Login() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { refreshData } = useTrading();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -24,6 +26,7 @@ export default function Login() {
       });
 
       if (data?.success) {
+        await refreshData();
         navigate('/dashboard');
       } else {
         throw new Error('Authentication failed');
@@ -108,7 +111,7 @@ export default function Login() {
               disabled={loading}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-5 rounded-2xl uppercase tracking-[0.2em] text-xs md:text-sm transition-all disabled:opacity-50 shadow-xl shadow-blue-900/20 active:scale-[0.98]"
             >
-              {loading ? 'Authenticating...' : 'Enter Arena'}
+              {loading ? 'Loading Portfolio...' : 'Enter Arena'}
             </button>
           </div>
         </form>

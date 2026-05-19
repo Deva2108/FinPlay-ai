@@ -72,7 +72,7 @@ export const API_ENDPOINTS = {
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000,
+  timeout: 45000,
 });
 
 // Interceptor for JWT
@@ -84,10 +84,22 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Interceptor for Expiration/Auth Errors
+// Interceptor for Expiration/Auth Errors + transient retry
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const config = error.config;
+
+    // Retry once on network/timeout failures (covers Render cold-start hangs)
+    const isTransient = !error.response &&
+      (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || error.message === 'Network Error');
+
+    if (isTransient && !config._retried) {
+      config._retried = true;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return api(config);
+    }
+
     if (error.response && error.response.status === 401) {
       const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/register';
       if (!isAuthPage) {
