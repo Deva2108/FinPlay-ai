@@ -90,7 +90,7 @@ public class MarketDataScheduler {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.example.stockPortfolio.ContentManagement.ContentService contentService;
 
-    @Scheduled(fixedRate = 1800000) // 30 minutes
+    @Scheduled(fixedRate = 1800000, initialDelay = 60000) // first run 60 s after startup
     public void precomputeAiInsights() {
         log.info("Starting AI Insight precomputation cycle...");
         for (String marketType : List.of("INDIA", "US")) {
@@ -129,7 +129,7 @@ public class MarketDataScheduler {
         }
     }
 
-    @Scheduled(fixedRate = 60000) // 1 minute
+    @Scheduled(fixedRate = 60000, initialDelay = 30000) // first run 30 s after startup
     public void hydrateMarketMirror() {
         Set<String> urgentSymbols = marketGateway.getPrioritySymbols();
         boolean marketOpen = marketStatusService.isAnyMarketOpen();

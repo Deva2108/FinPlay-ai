@@ -88,40 +88,44 @@ public class StockPortfolioApplication {
 	private record HostAndPort(String host, int port) {}
 
     @org.springframework.context.annotation.Bean
-    public org.springframework.boot.CommandLineRunner seedUniverse(com.example.stockPortfolio.MarketManagement.StockUniverseRepo repo) {
-        return args -> {
-            log.info("Ensuring default Stock Universe is populated...");
-            
-            // US Tech (USD)
-            upsertStock(repo, "AAPL", "Apple Inc.", "Tech", "US", "USD", "Mega Cap", false);
-            upsertStock(repo, "MSFT", "Microsoft", "Tech", "US", "USD", "Mega Cap", false);
-            upsertStock(repo, "NVDA", "NVIDIA", "Tech", "US", "USD", "Mega Cap", false);
-            upsertStock(repo, "TSLA", "Tesla, Inc.", "Automotive", "US", "USD", "Mega Cap", false);
-            upsertStock(repo, "META", "Meta Platforms", "Tech", "US", "USD", "Mega Cap", false);
-            upsertStock(repo, "AMZN", "Amazon", "Retail", "US", "USD", "Mega Cap", false);
-            upsertStock(repo, "GOOGL", "Alphabet Inc.", "Tech", "US", "USD", "Mega Cap", false);
-            
-            // US Finance/Energy (USD)
-            upsertStock(repo, "JPM", "JPMorgan Chase", "Finance", "US", "USD", "Mega Cap", false);
-            upsertStock(repo, "XOM", "Exxon Mobil", "Energy", "US", "USD", "Mega Cap", false);
-            
-            // India Bluechips (INR)
-            upsertStock(repo, "RELIANCE.NS", "Reliance Industries", "Energy", "INDIA", "INR", "Mega Cap", false);
-            upsertStock(repo, "TCS.NS", "TCS", "Tech", "INDIA", "INR", "Mega Cap", false);
-            upsertStock(repo, "INFY.NS", "Infosys", "Tech", "INDIA", "INR", "Large Cap", false);
-            upsertStock(repo, "HDFCBANK.NS", "HDFC Bank", "Finance", "INDIA", "INR", "Mega Cap", false);
-            upsertStock(repo, "ICICIBANK.NS", "ICICI Bank", "Finance", "INDIA", "INR", "Large Cap", false);
-            upsertStock(repo, "SBIN.NS", "State Bank of India", "Finance", "INDIA", "INR", "Large Cap", false);
-            upsertStock(repo, "TATAMOTORS.NS", "Tata Motors", "Automotive", "INDIA", "INR", "Large Cap", false);
-            upsertStock(repo, "ZOMATO.NS", "Zomato", "Tech", "INDIA", "INR", "Mid Cap", false);
+    public org.springframework.context.ApplicationListener<org.springframework.boot.context.event.ApplicationReadyEvent>
+    seedUniverse(com.example.stockPortfolio.MarketManagement.StockUniverseRepo repo) {
+        return event -> {
+            log.info("[startup] FinPlay backend READY — Tomcat serving on port 8080. Schedulers begin in 30-60 s.");
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                log.info("[warmup] Async default universe population started...");
 
-            // Indices
-            upsertStock(repo, "^NSEI", "NIFTY 50", "Index", "INDIA", "INR", "Index", true);
-            upsertStock(repo, "^BSESN", "SENSEX", "Index", "INDIA", "INR", "Index", true);
-            upsertStock(repo, "SPY", "S&P 500", "Index", "US", "USD", "Index", true);
-            upsertStock(repo, "QQQ", "NASDAQ 100", "Index", "US", "USD", "Index", true);
+                // US Tech (USD)
+                upsertStock(repo, "AAPL", "Apple Inc.", "Tech", "US", "USD", "Mega Cap", false);
+                upsertStock(repo, "MSFT", "Microsoft", "Tech", "US", "USD", "Mega Cap", false);
+                upsertStock(repo, "NVDA", "NVIDIA", "Tech", "US", "USD", "Mega Cap", false);
+                upsertStock(repo, "TSLA", "Tesla, Inc.", "Automotive", "US", "USD", "Mega Cap", false);
+                upsertStock(repo, "META", "Meta Platforms", "Tech", "US", "USD", "Mega Cap", false);
+                upsertStock(repo, "AMZN", "Amazon", "Retail", "US", "USD", "Mega Cap", false);
+                upsertStock(repo, "GOOGL", "Alphabet Inc.", "Tech", "US", "USD", "Mega Cap", false);
 
-            log.info("Stock Universe check complete.");
+                // US Finance/Energy (USD)
+                upsertStock(repo, "JPM", "JPMorgan Chase", "Finance", "US", "USD", "Mega Cap", false);
+                upsertStock(repo, "XOM", "Exxon Mobil", "Energy", "US", "USD", "Mega Cap", false);
+
+                // India Bluechips (INR)
+                upsertStock(repo, "RELIANCE.NS", "Reliance Industries", "Energy", "INDIA", "INR", "Mega Cap", false);
+                upsertStock(repo, "TCS.NS", "TCS", "Tech", "INDIA", "INR", "Mega Cap", false);
+                upsertStock(repo, "INFY.NS", "Infosys", "Tech", "INDIA", "INR", "Large Cap", false);
+                upsertStock(repo, "HDFCBANK.NS", "HDFC Bank", "Finance", "INDIA", "INR", "Mega Cap", false);
+                upsertStock(repo, "ICICIBANK.NS", "ICICI Bank", "Finance", "INDIA", "INR", "Large Cap", false);
+                upsertStock(repo, "SBIN.NS", "State Bank of India", "Finance", "INDIA", "INR", "Large Cap", false);
+                upsertStock(repo, "TATAMOTORS.NS", "Tata Motors", "Automotive", "INDIA", "INR", "Large Cap", false);
+                upsertStock(repo, "ZOMATO.NS", "Zomato", "Tech", "INDIA", "INR", "Mid Cap", false);
+
+                // Indices
+                upsertStock(repo, "^NSEI", "NIFTY 50", "Index", "INDIA", "INR", "Index", true);
+                upsertStock(repo, "^BSESN", "SENSEX", "Index", "INDIA", "INR", "Index", true);
+                upsertStock(repo, "SPY", "S&P 500", "Index", "US", "USD", "Index", true);
+                upsertStock(repo, "QQQ", "NASDAQ 100", "Index", "US", "USD", "Index", true);
+
+                log.info("[warmup] Async default universe population completed.");
+            });
         };
     }
 
