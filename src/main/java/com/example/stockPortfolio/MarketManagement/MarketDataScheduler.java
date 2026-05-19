@@ -177,10 +177,15 @@ public class MarketDataScheduler {
             normalIndex = endIndex;
         }
 
-        List<String> symbolsToFetch = new ArrayList<>(targets);
+        // Skip symbols whose Redis data is still within the 10-minute freshness window,
+        // unless they are urgent (user is actively viewing them).
+        List<String> symbolsToFetch = targets.stream()
+                .filter(s -> urgentSymbols.contains(s) || !marketGateway.isFresh(s))
+                .collect(Collectors.toList());
         if (symbolsToFetch.isEmpty()) return;
 
-        log.info("Starting batch market hydration for {} symbols...", symbolsToFetch.size());
+        log.info("Starting batch market hydration for {} symbols ({} skipped as fresh)...",
+                symbolsToFetch.size(), targets.size() - symbolsToFetch.size());
 
         try {
             // 3. FETCH & UPDATE MIRROR
