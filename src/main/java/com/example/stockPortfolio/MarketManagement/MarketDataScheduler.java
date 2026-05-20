@@ -1,6 +1,7 @@
 package com.example.stockPortfolio.MarketManagement;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -11,6 +12,9 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
+// @Lazy(false) forces eager instantiation so @Scheduled tasks register at startup
+// despite spring.main.lazy-initialization=true in the prod profile.
+@Lazy(false)
 @Component
 @Slf4j
 public class MarketDataScheduler {
@@ -26,7 +30,6 @@ public class MarketDataScheduler {
     private final com.example.stockPortfolio.PortfolioManagement.PortfolioRepo portfolioRepo;
     private final com.example.stockPortfolio.UserManagement.UserRepo userRepo;
     
-    private final ExecutorService marketHydrationExecutor;
     private final ExecutorService aiPrecomputationExecutor;
     
     private final ExternalMarketDataGateway externalMarketDataGateway;
@@ -70,11 +73,6 @@ public class MarketDataScheduler {
         this.googleSheetsService = googleSheetsService;
         this.stockUniverseRepo = stockUniverseRepo;
         
-        this.marketHydrationExecutor = new ThreadPoolExecutor(
-                10, 20, 60L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(500),
-                new ThreadPoolExecutor.CallerRunsPolicy()
-        );
         this.aiPrecomputationExecutor = new ThreadPoolExecutor(
                 3, 5, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(100),
@@ -85,7 +83,6 @@ public class MarketDataScheduler {
     @jakarta.annotation.PreDestroy
     public void shutdownExecutors() {
         log.info("Shutting down MarketDataScheduler executors...");
-        marketHydrationExecutor.shutdown();
         aiPrecomputationExecutor.shutdown();
     }
 
@@ -133,7 +130,7 @@ public class MarketDataScheduler {
         }
     }
 
-    @Scheduled(fixedRate = 60000, initialDelay = 30000) // first run 30 s after startup
+    @Scheduled(fixedRate = 180000, initialDelay = 30000) // first run 30 s after startup; 180 s keeps TwelveData within 800/day free-tier quota
     public void hydrateMarketMirror() {
         Set<String> urgentSymbols = marketGateway.getPrioritySymbols();
         boolean marketOpen = marketStatusService.isAnyMarketOpen();

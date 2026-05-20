@@ -16,11 +16,6 @@ public class SymbolNormalizer {
     private final StockUniverseRepo stockUniverseRepo;
     private final Map<String, StockUniverse> universeCache = new java.util.concurrent.ConcurrentHashMap<>();
 
-    @jakarta.annotation.PostConstruct
-    public void init() {
-        refreshCache();
-    }
-
     @org.springframework.scheduling.annotation.Scheduled(fixedRate = 1800000) // 30 minutes
     public void refreshCache() {
         log.info("Refreshing SymbolNormalizer universe cache...");

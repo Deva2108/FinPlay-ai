@@ -4,12 +4,16 @@ import com.example.stockPortfolio.HoldingsManagement.ApiResponse;
 import com.example.stockPortfolio.MarketManagement.MarketGateway;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
+// @Lazy(false) forces eager instantiation so @Scheduled tasks register at startup
+// despite spring.main.lazy-initialization=true in the prod profile.
+@Lazy(false)
 @Service
 @Slf4j
 @RequiredArgsConstructor
