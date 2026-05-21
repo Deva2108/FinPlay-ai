@@ -19,7 +19,7 @@ export default function FinPlayArena({ marketMode = "INDIA", onDecisionMade, onS
   const navigate = useNavigate();
   const [stocks, setStocks] = useState([]);
   const scenarioParams = useMemo(() => ({ marketType: marketMode }), [marketMode]);
-  const { data: scenarioData, status: scenarioStatus } = useInsight(API_ENDPOINTS.AI.SCENARIOS, scenarioParams);
+  const { data: scenarioData, status: scenarioStatus } = useInsight(API_ENDPOINTS.AI.ONBOARDING.SCENARIOS, scenarioParams);
   const loadingScenarios = scenarioStatus === 'SYNCING';
 
   useEffect(() => {
