@@ -38,7 +38,12 @@ export function TradingProvider({ children }) {
 
   const refreshData = useCallback(async () => {
     const token = localStorage.getItem('token');
-    if (!token) {
+    // Skip hydration for unauthenticated users and first-time users still in
+    // the onboarding flow. The Onboarding "finish" handler sets finplay_arena_done
+    // before navigating away, so post-onboarding callers (Portfolio mount, Login,
+    // executeBuy/executeSell) hydrate normally.
+    const isFirstTime = !localStorage.getItem('finplay_arena_done');
+    if (!token || isFirstTime) {
       setLoading(false);
       return;
     }
