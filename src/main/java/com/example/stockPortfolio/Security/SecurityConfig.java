@@ -26,6 +26,7 @@ public class SecurityConfig {
     private final JwtRequestFilter jwtRequestFilter;
     private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
     private final LoginRateLimitFilter loginRateLimitFilter;
+    private final GlobalApiRateLimitFilter globalApiRateLimitFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -56,6 +57,7 @@ public class SecurityConfig {
         // Order matters: rate-limit BEFORE jwt (cheap reject on brute force);
         // both BEFORE the standard username/password filter.
         http.addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class);
+        http.addFilterBefore(globalApiRateLimitFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(jwtRequestFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
@@ -100,6 +102,14 @@ public class SecurityConfig {
     @Bean
     public org.springframework.boot.web.servlet.FilterRegistrationBean<LoginRateLimitFilter>
             disableLoginRateLimitAutoRegistration(LoginRateLimitFilter f) {
+        var reg = new org.springframework.boot.web.servlet.FilterRegistrationBean<>(f);
+        reg.setEnabled(false);
+        return reg;
+    }
+
+    @Bean
+    public org.springframework.boot.web.servlet.FilterRegistrationBean<GlobalApiRateLimitFilter>
+            disableGlobalApiRateLimitAutoRegistration(GlobalApiRateLimitFilter f) {
         var reg = new org.springframework.boot.web.servlet.FilterRegistrationBean<>(f);
         reg.setEnabled(false);
         return reg;

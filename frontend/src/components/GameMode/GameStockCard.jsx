@@ -98,7 +98,7 @@ export default function GameStockCard({ stock, onClick }) {
             </div>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-black text-white tabular-nums tracking-tighter">{formatPrice(stock?.price, stock?.market)}</p>
+            <p className="text-2xl font-black text-white tabular-nums tracking-tighter">{formatPrice(stock?.price, stock?.currency || stock?.market || 'INR')}</p>
             <p className={`text-[10px] font-black px-2.5 py-1 rounded-lg mt-2 inline-block ${(stock?.change || "").startsWith('+') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
               {stock?.change} Today
             </p>
