@@ -12,9 +12,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
-// @Lazy(false) forces eager instantiation so @Scheduled tasks register at startup
-// despite spring.main.lazy-initialization=true in the prod profile.
-@Lazy(false)
+// Removed @Lazy(false) to prevent blocking startup on low-CPU environments.
 @Component
 @Slf4j
 public class MarketDataScheduler {

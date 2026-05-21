@@ -11,9 +11,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
-// @Lazy(false) forces eager instantiation so @Scheduled tasks register at startup
-// despite spring.main.lazy-initialization=true in the prod profile.
-@Lazy(false)
+// Removed @Lazy(false) to prevent blocking startup.
 @Service
 @Slf4j
 @RequiredArgsConstructor

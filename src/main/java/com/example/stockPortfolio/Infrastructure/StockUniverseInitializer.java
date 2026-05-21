@@ -23,6 +23,13 @@ public class StockUniverseInitializer {
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
         CompletableFuture.runAsync(() -> {
+            try {
+                // Delay seeding by 20s to allow Render health check to pass first
+                Thread.sleep(20000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
             log.info("[warmup] Async stock universe seeding started...");
 
             List<StockUniverse> stocks = List.of(
