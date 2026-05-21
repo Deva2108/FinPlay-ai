@@ -90,9 +90,20 @@ public class HoldingService {
 
     public HoldingResponseDTO getHoldingsWithDetails(Long userId, Long portfolioId) {
         List<Holding> holdings = holdingRepo.findByUserIdAndPortfolioId(userId, portfolioId);
-        
+
         List<String> symbols = holdings.stream().map(Holding::getSymbol).toList();
         Map<String, Map<String, Object>> quotes = marketGateway.getBatchQuotes(symbols);
+
+        // PHASE 1 N+1 FIX: prefetch all StockUniverse rows for this portfolio in ONE
+        // `WHERE symbol IN (...)` query, instead of calling
+        // marketAnalysisService.getSectorForSymbol(...) once per holding
+        // (which previously issued one SELECT against stock_universe per row).
+        // For a portfolio with N holdings: queries go from (1 + N) to (1 + 1 + 1).
+        Map<String, com.example.stockPortfolio.MarketManagement.StockUniverse> universeMap =
+                marketAnalysisService.getUniverseBySymbols(symbols);
+
+        // Pre-fetch forex rate once to avoid N individual Redis GETs inside the loop (Phase 2).
+        java.math.BigDecimal usdInrRate = forexService.getCachedUsdInr().getRate();
 
         List<HoldingStatusDTO> statusList = holdings.stream()
             .map(h -> {
@@ -100,19 +111,28 @@ public class HoldingService {
 
                 if (quote != null && quote.containsKey("price")) {
                     java.math.BigDecimal rawPrice = new java.math.BigDecimal(quote.get("price").toString());
-                    
-                    // CONVERSION LOGIC: If stock is US, convert price to INR
-                    java.math.BigDecimal currentPriceInInr = rawPrice;
-                    if (!marketGateway.getSymbolNormalizer().isIndian(h.getSymbol())) {
-                        currentPriceInInr = forexService.convertUsdToInr(rawPrice);
-                    }
+
+                    // Read sector/market from the prefetched map. Prefer DB-sourced
+                    // market when available; fall back to the symbol-suffix heuristic
+                    // for symbols missing from stock_universe.
+                    com.example.stockPortfolio.MarketManagement.StockUniverse universe =
+                            universeMap.get(h.getSymbol());
+                    boolean isIndian = universe != null
+                            ? "INDIA".equalsIgnoreCase(universe.getMarket())
+                            : marketGateway.getSymbolNormalizer().isIndian(h.getSymbol());
+                    String sector = universe != null ? universe.getSector() : "Other";
+
+                    // CONVERSION LOGIC: If stock is US, convert price to INR using pre-fetched rate
+                    java.math.BigDecimal currentPriceInInr = isIndian
+                            ? rawPrice
+                            : forexService.convertUsdToInr(rawPrice, usdInrRate);
                     currentPriceInInr = currentPriceInInr.setScale(2, RoundingMode.HALF_UP);
 
                     HoldingStatusDTO dto = new HoldingStatusDTO();
                     dto.setSymbol(h.getSymbol());
                     dto.setCompanyName(quote.getOrDefault("name", quote.getOrDefault("companyName", h.getSymbol())).toString());
-                    dto.setSector(marketAnalysisService.getSectorForSymbol(h.getSymbol()));
-                    dto.setMarket(marketGateway.getSymbolNormalizer().isIndian(h.getSymbol()) ? "INDIA" : "US");
+                    dto.setSector(sector);
+                    dto.setMarket(isIndian ? "INDIA" : "US");
                     dto.setCurrency("INR");
                     dto.setQuantity(h.getQuantity());
                     dto.setBuyPrice(h.getBuyPrice().setScale(2, RoundingMode.HALF_UP));
@@ -264,6 +284,16 @@ public class HoldingService {
         List<String> symbols = holdings.stream().map(Holding::getSymbol).toList();
         Map<String, Map<String, Object>> quotes = marketGateway.getBatchQuotes(symbols);
 
+        // PHASE 1 N+1 HARDENING: prefetch StockUniverse rows once. Today this method
+        // doesn't hit the DB per row, but sourcing `market` from the DB instead of the
+        // symbol-suffix heuristic is more accurate, and keeps the loop N+1-proof for
+        // any future logic (e.g., sector-weighted exposure).
+        Map<String, com.example.stockPortfolio.MarketManagement.StockUniverse> universeMap =
+                marketAnalysisService.getUniverseBySymbols(symbols);
+
+        // Pre-fetch forex rate once (Phase 2).
+        java.math.BigDecimal usdInrRate = forexService.getCachedUsdInr().getRate();
+
         java.math.BigDecimal totalValue = java.math.BigDecimal.ZERO;
         java.math.BigDecimal targetValue = java.math.BigDecimal.ZERO;
 
@@ -271,11 +301,17 @@ public class HoldingService {
             Map<String, Object> quote = quotes.get(h.getSymbol());
             if (quote != null && quote.containsKey("price")) {
                 java.math.BigDecimal rawPrice = new java.math.BigDecimal(quote.get("price").toString());
-                java.math.BigDecimal priceInInr = rawPrice;
-                if (!marketGateway.getSymbolNormalizer().isIndian(h.getSymbol())) {
-                    priceInInr = forexService.convertUsdToInr(rawPrice);
-                }
-                
+
+                com.example.stockPortfolio.MarketManagement.StockUniverse universe =
+                        universeMap.get(h.getSymbol());
+                boolean isIndian = universe != null
+                        ? "INDIA".equalsIgnoreCase(universe.getMarket())
+                        : marketGateway.getSymbolNormalizer().isIndian(h.getSymbol());
+
+                java.math.BigDecimal priceInInr = isIndian
+                        ? rawPrice
+                        : forexService.convertUsdToInr(rawPrice, usdInrRate);
+
                 java.math.BigDecimal value = priceInInr.multiply(h.getQuantity());
                 totalValue = totalValue.add(value);
                 if (h.getSymbol().equalsIgnoreCase(symbol)) {

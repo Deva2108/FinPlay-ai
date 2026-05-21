@@ -14,8 +14,8 @@ import java.time.LocalDate;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "stock_history", 
-       uniqueConstraints = {@UniqueConstraint(columnNames = {"symbol", "date"})},
-       indexes = {@Index(columnList = "symbol, date")})
+       uniqueConstraints = {@UniqueConstraint(columnNames = {"symbol", "date", "market"})},
+       indexes = {@Index(columnList = "symbol, date, market")})
 public class StockHistory {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -23,6 +23,9 @@ public class StockHistory {
 
     @Column(nullable = false)
     private String symbol;
+
+    @Column(nullable = false)
+    private String market; // "INDIA" or "US"
 
     @Column(nullable = false)
     private LocalDate date;

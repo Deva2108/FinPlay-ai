@@ -69,7 +69,16 @@ public class ForexService {
         if (usd == null) return BigDecimal.ZERO;
         ForexQuoteDTO rate = getCachedUsdInr();
         BigDecimal effectiveRate = (rate != null && rate.getRate() != null) ? rate.getRate() : FALLBACK_RATE;
-        return usd.multiply(effectiveRate).setScale(2, java.math.RoundingMode.HALF_UP);
+        return convertUsdToInr(usd, effectiveRate);
+    }
+
+    /** 
+     * Bulk-friendly conversion that uses a pre-fetched rate (Phase 2 optimization). 
+     */
+    public BigDecimal convertUsdToInr(BigDecimal usd, BigDecimal effectiveRate) {
+        if (usd == null) return BigDecimal.ZERO;
+        BigDecimal rate = (effectiveRate != null) ? effectiveRate : FALLBACK_RATE;
+        return usd.multiply(rate).setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
     /** Convert INR back to USD. */

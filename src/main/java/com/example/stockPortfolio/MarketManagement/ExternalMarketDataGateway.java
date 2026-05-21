@@ -82,9 +82,9 @@ public class ExternalMarketDataGateway {
 
     /**
      * Tries to fetch a quote from the best available source.
-     * New Fallback Chain: Yahoo Public (Free) -> Twelve Data (Key) -> Finnhub (Key) -> AlphaVantage (Key) -> Mock
+     * New Fallback Chain: Twelve Data (Key) -> Finnhub (Key) -> AlphaVantage (Key) -> Yahoo Public (Fallback)
      * 
-     * IMPORTANT: This method is UNTHROTTLED because it manages its own fallback hierarchy.
+     * IMPORTANT: Authenticated providers are tried first as they have defined quotas.
      */
     public Map<String, Object> fetchQuoteWithFallback(String symbol) {
         String normalized = symbolNormalizer.normalize(symbol);
@@ -97,17 +97,7 @@ public class ExternalMarketDataGateway {
             return cachedQuote;
         }
 
-        // 1. TRY YAHOO PUBLIC (Unlimited, Free, covers US & India)
-        // This is the "SHIELD" - it has NO local rate limiter because it's public.
-        try {
-            Map<String, Object> yahooQuote = yahooFinanceService.fetchPublicQuote(normalized);
-            if (yahooQuote != null) return yahooQuote;
-        } catch (Exception e) {
-            log.debug("Yahoo Public failed for {}, trying authenticated providers...", normalized);
-        }
-
-        // 2. TRY AUTHENTICATED PROVIDERS (Managed by local RateLimiters)
-        // If these fail OR are locally rate-limited, we catch the exception and return mock.
+        // 1. TRY AUTHENTICATED PROVIDERS (Managed by local RateLimiters)
         try {
             Map<String, Object> twelveQuote = fetchTwelveDataQuote(normalized);
             if (twelveQuote != null) return twelveQuote;
@@ -124,29 +114,19 @@ public class ExternalMarketDataGateway {
                 if (st != null) return st;
             }
         } catch (Exception e) {
-            log.error("All real providers failed for {}. Returning stable mock.", normalized);
+            log.debug("Standard authenticated providers failed for {}", normalized);
         }
 
-        return generateMockQuote(normalized);
-    }
+        // 2. LAST RESORT: YAHOO PUBLIC (Unauthenticated, high risk of IP block)
+        try {
+            Map<String, Object> yahooQuote = yahooFinanceService.fetchPublicQuote(normalized);
+            if (yahooQuote != null) return yahooQuote;
+        } catch (Exception e) {
+            log.warn("Yahoo Public fallback failed for {}: {}", normalized, e.getMessage());
+        }
 
-    /**
-     * Generates a stable, hash-based mock price when all external APIs fail.
-     * Crucial: No minute-based drift to prevent users from gaming the system during outages.
-     */
-    public Map<String, Object> generateMockQuote(String symbol) {
-        Map<String, Object> res = new HashMap<>();
-        res.put("symbol", symbol);
-        
-        // Base price is static per symbol to ensure consistency
-        double basePrice = Math.abs(symbol.hashCode() % 500) + 50.0;
-        
-        res.put("price", Math.round(basePrice * 100.0) / 100.0);
-        res.put("changesPercentage", 0.0);
-        res.put("c", basePrice); // Legacy Finnhub compat
-        res.put("dp", 0.0);
-        res.put("source", "emergency_mock");
-        return res;
+        log.error("All real providers failed for {}. Returning null.", normalized);
+        return null;
     }
 
     @CircuitBreaker(name = "twelvedata", fallbackMethod = "quoteFallback")

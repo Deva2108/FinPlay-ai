@@ -36,19 +36,23 @@ public class MarketDataScheduler {
     private final MarketStatusService marketStatusService;
     private final GoogleSheetsService googleSheetsService;
     private final StockUniverseRepo stockUniverseRepo;
-    
+    private final org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate;
+    private final MarketAnalysisService marketAnalysisService;
+
     private int highPriorityIndex = 0;
     private int normalIndex = 0;
+    private int afterHoursIndex = 0;
     private int chartCycleCounter = 0;
     private static final int CHART_UPDATE_FREQUENCY = 5;
     private static final int BATCH_SIZE = 12;
 
     // TwelveData free tier: 8 credits/min, 1 credit per symbol even in batch calls.
-    // Keep cycle limit at 6 to leave headroom for urgent symbols without breaching quota.
-    private static final int TWELVEDATA_CYCLE_LIMIT = 6;
+    // We utilize the full 8 credits/min headroom for high-priority user needs.
+    private static final int TWELVEDATA_CYCLE_LIMIT = 8;
+    private static final int AFTER_HOURS_BATCH_SIZE = 4;
 
     public MarketDataScheduler(FinnhubService finnhubService, NewsApiService newsApiService, 
-                               MarketGateway marketGateway, 
+                               MarketGateway marketGateway,
                                SymbolNormalizer symbolNormalizer, 
                                com.example.stockPortfolio.HoldingsManagement.HoldingRepo holdingRepo, 
                                com.example.stockPortfolio.AlertManagement.AlertRepo alertRepo, 
@@ -58,7 +62,9 @@ public class MarketDataScheduler {
                                ExternalMarketDataGateway externalMarketDataGateway,
                                MarketStatusService marketStatusService,
                                GoogleSheetsService googleSheetsService,
-                               StockUniverseRepo stockUniverseRepo) {
+                               StockUniverseRepo stockUniverseRepo,
+                               org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate,
+                               MarketAnalysisService marketAnalysisService) {
         this.finnhubService = finnhubService;
         this.newsApiService = newsApiService;
         this.marketGateway = marketGateway;
@@ -72,12 +78,113 @@ public class MarketDataScheduler {
         this.marketStatusService = marketStatusService;
         this.googleSheetsService = googleSheetsService;
         this.stockUniverseRepo = stockUniverseRepo;
+        this.redisTemplate = redisTemplate;
+        this.marketAnalysisService = marketAnalysisService;
         
         this.aiPrecomputationExecutor = new ThreadPoolExecutor(
                 3, 5, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(100),
                 new ThreadPoolExecutor.CallerRunsPolicy()
         );
+    }
+
+    @Scheduled(fixedRate = 60000, initialDelay = 120000)
+    public void afterHoursHydration() {
+        boolean indiaClosed = !marketStatusService.isIndianMarketOpen();
+        boolean usClosed = !marketStatusService.isUsMarketOpen();
+
+        // If both are open, the live hydration handles everything.
+        if (!indiaClosed && !usClosed) return;
+
+        log.debug("Starting market-aware after-hours hydration (India Closed: {}, US Closed: {})", indiaClosed, usClosed);
+        
+        List<StockUniverse> universe = stockUniverseRepo.findAll();
+        if (universe.isEmpty()) return;
+
+        // CONTINUOUS ROTATION: Slice the universe to ensure every stock gets updated eventually.
+        if (afterHoursIndex >= universe.size()) afterHoursIndex = 0;
+        int end = Math.min(afterHoursIndex + 20, universe.size()); // Take a 20-symbol window to scan
+        List<StockUniverse> window = universe.subList(afterHoursIndex, end);
+        afterHoursIndex = end;
+
+        // Find symbols in closed markets that need hydration (stale for > 12 hours)
+        List<String> targets = window.stream()
+                .filter(s -> {
+                    boolean isIndian = symbolNormalizer.isIndian(s.getSymbol());
+                    if (isIndian && !indiaClosed) return false;
+                    if (!isIndian && !usClosed) return false;
+
+                    // During after-hours, we refresh if data is older than 12 hours
+                    // ensuring we get at least one fresh EOD price per night.
+                    return !marketGateway.isFresh(s.getSymbol()); 
+                })
+                .map(StockUniverse::getSymbol)
+                .limit(AFTER_HOURS_BATCH_SIZE)
+                .toList();
+
+        if (targets.isEmpty()) return;
+
+        log.info("After-hours hydration (Continuous Rotation): Fetching {} symbols.", targets.size());
+        try {
+            Map<String, Map<String, Object>> quotes = externalMarketDataGateway.fetchTwelveDataBatch(targets);
+            if (!quotes.isEmpty()) {
+                quotes.forEach(marketGateway::updateMirror);
+            } else {
+                for (String s : targets) {
+                    Map<String, Object> q = externalMarketDataGateway.fetchQuoteWithFallback(s);
+                    if (q != null) marketGateway.updateMirror(s, q);
+                    Thread.sleep(1000); 
+                }
+            }
+        } catch (Exception e) {
+            log.error("Market-aware hydration cycle failed: {}", e.getMessage());
+        }
+    }
+
+    @Scheduled(fixedRate = 60000, initialDelay = 45000)
+    public void precomputeTopMovers() {
+        log.debug("Starting Top Movers precomputation...");
+        try {
+            List<Map<String, Object>> allData = marketAnalysisService.getMarketData();
+            if (allData.isEmpty()) return;
+
+            // 1. Gainers
+            List<Map<String, Object>> gainers = allData.stream()
+                    .sorted((a, b) -> Double.compare(
+                            getDouble(b, "changesPercentage"),
+                            getDouble(a, "changesPercentage")))
+                    .limit(20)
+                    .toList();
+            marketGateway.updateTopMovers("gainers", gainers);
+
+            // 2. Losers
+            List<Map<String, Object>> losers = allData.stream()
+                    .sorted((a, b) -> Double.compare(
+                            getDouble(a, "changesPercentage"),
+                            getDouble(b, "changesPercentage")))
+                    .limit(20)
+                    .toList();
+            marketGateway.updateTopMovers("losers", losers);
+
+            // 3. Trending (Absolute change)
+            List<Map<String, Object>> trending = allData.stream()
+                    .sorted((a, b) -> Double.compare(
+                            Math.abs(getDouble(b, "changesPercentage")),
+                            Math.abs(getDouble(a, "changesPercentage"))))
+                    .limit(10)
+                    .toList();
+            marketGateway.updateTopMovers("trending", trending);
+
+            log.info("Top Movers precomputed and cached in Redis.");
+        } catch (Exception e) {
+            log.error("Top Movers precomputation failed: {}", e.getMessage());
+        }
+    }
+
+    private double getDouble(Map<String, Object> map, String key) {
+        Object val = map.get(key);
+        if (val instanceof Number) return ((Number) val).doubleValue();
+        return 0.0;
     }
 
     @jakarta.annotation.PreDestroy
@@ -130,97 +237,83 @@ public class MarketDataScheduler {
         }
     }
 
-    @Scheduled(fixedRate = 180000, initialDelay = 30000) // first run 30 s after startup; 180 s keeps TwelveData within 800/day free-tier quota
+    @Scheduled(fixedRate = 60000, initialDelay = 30000)
     public void hydrateMarketMirror() {
         Set<String> urgentSymbols = marketGateway.getPrioritySymbols();
-        boolean marketOpen = marketStatusService.isAnyMarketOpen();
+        boolean marketActive = marketStatusService.isAnyMarketActive();
 
-        if (!marketOpen && urgentSymbols.isEmpty()) return;
+        // If no market is active (Open or Pre-Market) and no user is actively waiting, skip
+        if (!marketActive && urgentSymbols.isEmpty()) return;
 
-        // 1. COLLECT TARGETS (Priorities + Holdings + Universe)
+        // 1. COLLECT TARGETS (Strict Priority: Urgent -> Holdings -> Universe)
         Set<String> targets = new LinkedHashSet<>();
         
-        // Always include urgent symbols first
-        urgentSymbols.forEach(s -> {
-            String n = symbolNormalizer.normalize(s);
-            if (n != null) targets.add(n);
-        });
+        // Priority 1: Symbols user is currently looking at (from SYNCING state)
+        urgentSymbols.stream()
+            .map(symbolNormalizer::normalize)
+            .filter(Objects::nonNull)
+            .limit(TWELVEDATA_CYCLE_LIMIT) // Maximize TwelveData quota
+            .forEach(targets::add);
 
-        // Collect all potential symbols
-        List<String> allSymbols = new ArrayList<>();
-        try {
-            holdingRepo.findAllDistinctSymbols().forEach(s -> {
-                String n = symbolNormalizer.normalize(s);
-                if (n != null && !targets.contains(n)) allSymbols.add(n);
-            });
-        } catch (Exception e) {
-            log.warn("Failed to fetch holdings: {}", e.getMessage());
-        }
-        
-        List<String> universe = getUniverse();
-        universe.forEach(s -> {
-            if (!targets.contains(s) && !allSymbols.contains(s)) {
-                allSymbols.add(s);
-            }
-        });
-
-        // 2. APPLY BATCH ROTATION
-        // Keep rotation window at TWELVEDATA_CYCLE_LIMIT so that steady-state
-        // refresh rate (symbols/min) stays within the TwelveData free-tier quota.
-        int batchSize = TWELVEDATA_CYCLE_LIMIT;
-        int remainingSlots = batchSize - targets.size();
-        
-        if (remainingSlots > 0 && !allSymbols.isEmpty()) {
-            if (normalIndex >= allSymbols.size()) {
-                normalIndex = 0;
+        // Priority 2: If we have room, fill with other active symbols (Holdings/Universe)
+        if (targets.size() < TWELVEDATA_CYCLE_LIMIT) {
+            List<String> allSymbols = new ArrayList<>();
+            try {
+                holdingRepo.findAllDistinctSymbols().forEach(s -> {
+                    String n = symbolNormalizer.normalize(s);
+                    if (n != null && !targets.contains(n)) allSymbols.add(n);
+                });
+            } catch (Exception e) {
+                log.warn("Failed to fetch holdings: {}", e.getMessage());
             }
             
-            int endIndex = Math.min(normalIndex + remainingSlots, allSymbols.size());
-            targets.addAll(allSymbols.subList(normalIndex, endIndex));
-            normalIndex = endIndex;
+            getUniverse().forEach(s -> {
+                if (!targets.contains(s) && !allSymbols.contains(s)) {
+                    allSymbols.add(s);
+                }
+            });
+
+            int remainingSlots = TWELVEDATA_CYCLE_LIMIT - targets.size();
+            if (!allSymbols.isEmpty()) {
+                if (normalIndex >= allSymbols.size()) normalIndex = 0;
+                int endIndex = Math.min(normalIndex + remainingSlots, allSymbols.size());
+                targets.addAll(allSymbols.subList(normalIndex, endIndex));
+                normalIndex = endIndex;
+            }
         }
 
-        // Skip symbols whose Redis data is still within the 10-minute freshness window.
-        // Urgent symbols are also skipped if updated within the last 60 seconds to
-        // prevent burning TwelveData credits on data that is still effectively live.
+        // 2. FILTER FOR STALE ONLY
         List<String> symbolsToFetch = targets.stream()
                 .filter(s -> !marketGateway.isFresh(s))
-                .collect(Collectors.toList());
+                .toList();
+        
         if (symbolsToFetch.isEmpty()) return;
 
-        // Hard quota cap: only pass up to TWELVEDATA_CYCLE_LIMIT symbols to the TwelveData
-        // batch. Urgent symbols are sorted first in symbolsToFetch, so they get priority
-        // within the cap. Symbols beyond the cap are deferred to the next 60-second cycle
-        // or served by Yahoo Finance via the individual fallback chain below.
-        List<String> batchedSymbols = symbolsToFetch.size() > TWELVEDATA_CYCLE_LIMIT
-                ? symbolsToFetch.subList(0, TWELVEDATA_CYCLE_LIMIT)
-                : symbolsToFetch;
-
-        log.info("Market hydration: {} stale symbols ({} capped for TwelveData batch, {} deferred).",
-                symbolsToFetch.size(), batchedSymbols.size(), symbolsToFetch.size() - batchedSymbols.size());
+        log.info("Hydration cycle: Fetching {} symbols ({} urgent). Quota: 8/min.", 
+                 symbolsToFetch.size(), urgentSymbols.size());
 
         try {
-            // 3. FETCH & UPDATE MIRROR via TwelveData batch (quota-capped list)
-            Map<String, Map<String, Object>> quotes = externalMarketDataGateway.fetchTwelveDataBatch(batchedSymbols);
+            // 3. EXECUTE BATCH (TwelveData)
+            Map<String, Map<String, Object>> quotes = externalMarketDataGateway.fetchTwelveDataBatch(symbolsToFetch);
 
-            // 4. FALLBACK: If batch returns nothing (429/outage), try individual Yahoo-first
-            // chain for all stale symbols — Yahoo is free and does not consume TwelveData credits.
-            if (quotes.isEmpty()) {
-                log.info("Batch fetch returned 0 results. Falling back to individual provider chain for all {} stale symbols.", symbolsToFetch.size());
+            if (!quotes.isEmpty()) {
+                quotes.forEach(marketGateway::updateMirror);
+                log.info("Hydration cycle: Successfully updated {} symbols.", quotes.size());
+            } else {
+                // LAST RESORT: Yahoo slow-poll (Free, unthrottled but risk of ban)
+                log.warn("Batch failed. Falling back to individual Yahoo poll for {} symbols.", symbolsToFetch.size());
                 for (String s : symbolsToFetch) {
                     Map<String, Object> q = externalMarketDataGateway.fetchQuoteWithFallback(s);
                     if (q != null) marketGateway.updateMirror(s, q);
+                    // Minimal delay to be kind to Yahoo
+                    Thread.sleep(500);
                 }
-            } else {
-                quotes.forEach(marketGateway::updateMirror);
             }
 
-            // 5. CLEANUP
+            // 4. CLEANUP
             marketGateway.clearPrioritySymbols(symbolsToFetch);
-            log.info("Successfully updated mirror for {} symbols.", Math.max(quotes.size(), 0));
-            
         } catch (Exception e) {
-            log.error("Batch hydration failed: {}", e.getMessage());
+            log.error("Hydration cycle failed: {}", e.getMessage());
         }
     }
 

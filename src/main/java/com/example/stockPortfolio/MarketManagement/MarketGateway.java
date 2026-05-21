@@ -228,18 +228,108 @@ public class MarketGateway {
     }
 
     /**
-     * Reads multiple stock quotes in a single Redis call.
+     * Reads multiple stock quotes with at most TWO Redis roundtrips (one MGET on
+     * {@code stock:*} keys, one MGET on {@code last_close:*} keys for any misses),
+     * plus an in-process L1 (Caffeine) check for indices.
+     *
+     * <p>Previously this method looped {@link #getStockQuote(String)} per symbol,
+     * which produced N Redis GETs on the hot path of the holdings/alerts/market
+     * endpoints. On free-tier Redis (Upstash HTTP, ~50 ms per call) that meant a
+     * 20-symbol portfolio paid ~1 s just on Redis network time. Two MGETs reduce
+     * the same workload to ~100 ms regardless of portfolio size.
+     *
+     * <p>Fallback chain mirrors {@link #getLatestQuote(String)}:
+     * L1 indices cache → Redis {@code stock:*} → Redis {@code last_close:*} → emergency mock.
+     *
+     * @param symbols caller-supplied symbol list; output map is keyed by these same strings
+     *                (preserves caller's casing) so existing call sites don't break.
      */
+    @SuppressWarnings("unchecked")
     public Map<String, Map<String, Object>> getBatchQuotes(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) return Collections.emptyMap();
 
-        Map<String, Map<String, Object>> results = new HashMap<>();
+        // Normalize once; remember the original input string so the result map
+        // is keyed exactly like the caller asked (callers use Holding.getSymbol()
+        // which is already upper-cased, but be defensive).
+        List<String> normalizedSymbols = new ArrayList<>(symbols.size());
+        Map<String, String> originalBySymbol = new LinkedHashMap<>();
         for (String s : symbols) {
-            ApiResponse<Map<String, Object>> quoteResp = getStockQuote(s);
-            if (quoteResp != null && quoteResp.getData() != null) {
-                results.put(s, quoteResp.getData());
+            String n = normalizeSymbol(s);
+            if (n != null && !originalBySymbol.containsKey(n)) {
+                normalizedSymbols.add(n);
+                originalBySymbol.put(n, s);
             }
         }
+        if (normalizedSymbols.isEmpty()) return Collections.emptyMap();
+
+        Map<String, Map<String, Object>> results = new LinkedHashMap<>();
+
+        // Pass 1: L1 (Caffeine) cache for indices — avoids Redis altogether for
+        // the handful of indices we keep super-hot.
+        org.springframework.cache.Cache indexCache = l1CacheManager.getCache("indices");
+        List<String> needRedis = new ArrayList<>(normalizedSymbols.size());
+        for (String n : normalizedSymbols) {
+            if (indexCache != null && symbolNormalizer.isIndex(n)) {
+                Map<String, Object> data = indexCache.get(n, Map.class);
+                if (data != null) {
+                    results.put(originalBySymbol.get(n), data);
+                    continue;
+                }
+            }
+            needRedis.add(n);
+        }
+        if (needRedis.isEmpty()) return results;
+
+        // Pass 2: ONE Redis MGET on stock:* — replaces N individual GETs.
+        List<String> stockKeys = needRedis.stream().map(n -> STOCK_KEY_PREFIX + n).toList();
+        List<Object> stockValues;
+        try {
+            stockValues = redisTemplate.opsForValue().multiGet(stockKeys);
+        } catch (Exception e) {
+            log.error("Redis MGET (stock) failed for {} symbols: {}", stockKeys.size(), e.getMessage());
+            stockValues = null;
+        }
+
+        List<String> needFallback = new ArrayList<>();
+        for (int i = 0; i < needRedis.size(); i++) {
+            Object data = (stockValues != null && i < stockValues.size()) ? stockValues.get(i) : null;
+            if (data instanceof Map) {
+                Map<String, Object> quote = (Map<String, Object>) data;
+                results.put(originalBySymbol.get(needRedis.get(i)), quote);
+                // Warm L1 for indices so the next request skips Redis entirely.
+                if (indexCache != null && symbolNormalizer.isIndex(needRedis.get(i))) {
+                    indexCache.put(needRedis.get(i), quote);
+                }
+            } else {
+                needFallback.add(needRedis.get(i));
+            }
+        }
+
+        // Pass 3: ONE Redis MGET on last_close:* for everything still missing.
+        if (!needFallback.isEmpty()) {
+            List<String> closeKeys = needFallback.stream().map(n -> LAST_CLOSE_PREFIX + n).toList();
+            List<Object> closeValues;
+            try {
+                closeValues = redisTemplate.opsForValue().multiGet(closeKeys);
+            } catch (Exception e) {
+                log.error("Redis MGET (last_close) failed for {} symbols: {}", closeKeys.size(), e.getMessage());
+                closeValues = null;
+            }
+
+            for (int i = 0; i < needFallback.size(); i++) {
+                String n = needFallback.get(i);
+                Object data = (closeValues != null && i < closeValues.size()) ? closeValues.get(i) : null;
+                if (data instanceof Map) {
+                    results.put(originalBySymbol.get(n), (Map<String, Object>) data);
+                } else {
+                    // Pass 4: No legitimate data found. Mark for urgent hydration and return null.
+                    // Callers (like getMarketData) will filter out nulls or handle them as SYNCING.
+                    log.info("Deep fallback failed for {}. Queueing for hydration.", n);
+                    markAsPriority(n);
+                }
+            }
+        }
+
         return results;
     }
     /**
@@ -301,14 +391,14 @@ public class MarketGateway {
             log.error("Redis Read Error for {}: {}", symbol, e.getMessage());
         }
 
-        // 4. Final Failover: Emergency Mock (Guarantees NO NULL and price consistency)
-        log.warn("Deep failover triggered for symbol: {}. Serving emergency mock.", normalized);
-        Map<String, Object> mock = externalMarketDataGateway.generateMockQuote(normalized);
+        // 4. Final Failover: Queue for hydration and return SYNCING. 
+        // We no longer generate fake/mock quotes during the request cycle.
+        log.info("Symbol {} not in cache. Queueing for hydration and returning SYNCING.", normalized);
         
-        // Mark as priority for the next scheduler cycle to try and get real data
+        // Mark as priority for the next scheduler cycle to fetch real data
         markAsPriority(normalized);
 
-        return createOkResponse(mock, "FALLBACK");
+        return ApiResponse.syncing(null, "Price data is being synced. Please wait.", "SYNCING");
     }
 
     private ApiResponse<Map<String, Object>> createOkResponse(Map<String, Object> quoteMap, String source) {
@@ -436,8 +526,8 @@ public class MarketGateway {
         // Stamp freshness so the scheduler and gateway can skip redundant fetches
         markFreshTimestamp(normalized);
 
-        // Also update Last Close as a high-quality fallback (24 hours TTL)
-        redisTemplate.opsForValue().set(LAST_CLOSE_PREFIX + normalized, data, 24, TimeUnit.HOURS);
+        // Also update Last Close as a high-quality fallback (7 days TTL for durability)
+        redisTemplate.opsForValue().set(LAST_CLOSE_PREFIX + normalized, data, 7, TimeUnit.DAYS);
         
         // Sync L1 Cache (Caffeine) to prevent staleness on this node
         if (symbolNormalizer.isIndex(normalized)) {
@@ -451,16 +541,19 @@ public class MarketGateway {
         // DAILY PERSISTENCE: Save to stock_history ONLY if it doesn't exist for today
         try {
             java.time.LocalDate today = java.time.LocalDate.now();
+            String market = symbolNormalizer.isIndian(normalized) ? "INDIA" : "US";
+            
             if (!stockHistoryRepo.existsBySymbolAndDate(normalized, today)) {
                 double price = Double.parseDouble(data.get("price").toString());
                 StockHistory history = StockHistory.builder()
                         .symbol(normalized)
+                        .market(market)
                         .date(today)
                         .close(java.math.BigDecimal.valueOf(price))
                         .isSimulated(false)
                         .build();
                 stockHistoryRepo.save(history);
-                log.info("Persisted daily history for {}: {}", normalized, price);
+                log.info("Persisted daily history for {} ({}): {}", normalized, market, price);
             }
         } catch (Exception e) {
             log.warn("Failed to persist daily history for {}: {}", normalized, e.getMessage());
@@ -537,21 +630,21 @@ public class MarketGateway {
 
     /**
      * Searches our local mirrored universe for symbols matching the query.
-     * This replaces the live Finnhub search to avoid rate limits.
+     * High Reliability: Pulls from mirror, falls back to last_close, queues stale symbols.
      */
     public List<Map<String, Object>> searchLocalMirror(String query) {
         try {
             String safeQuery = query == null ? "" : query.toLowerCase(Locale.ROOT);
             
-            // Optimization: Use SCAN instead of MEMBERS to avoid blocking Redis if the set is huge
-            List<String> matchingKeys = new ArrayList<>();
+            // 1. Identify matching symbols via SCAN
+            List<String> matchingSymbols = new ArrayList<>();
             redisTemplate.execute((org.springframework.data.redis.connection.RedisConnection connection) -> {
                 try (org.springframework.data.redis.core.Cursor<byte[]> cursor = connection.sScan(ACTIVE_SYMBOLS_SET_KEY.getBytes(), 
                         org.springframework.data.redis.core.ScanOptions.scanOptions().match("*").count(1000).build())) {
-                    while (cursor.hasNext() && matchingKeys.size() < 20) {
+                    while (cursor.hasNext() && matchingSymbols.size() < 20) {
                         String symbol = new String(cursor.next());
                         if (symbol.toLowerCase(Locale.ROOT).contains(safeQuery)) {
-                            matchingKeys.add(STOCK_KEY_PREFIX + symbol);
+                            matchingSymbols.add(symbol);
                         }
                     }
                 } catch (Exception e) {
@@ -560,18 +653,42 @@ public class MarketGateway {
                 return null;
             });
 
-            if (matchingKeys.isEmpty()) return Collections.emptyList();
+            if (matchingSymbols.isEmpty()) return Collections.emptyList();
 
-            List<Object> values = redisTemplate.opsForValue().multiGet(matchingKeys);
-            return values.stream()
-                    .filter(v -> v instanceof Map)
-                    .map(v -> (Map<String, Object>) v)
-                    .limit(10)
-                    .toList();
+            // 2. Bulk fetch latest quotes
+            Map<String, Map<String, Object>> batch = getBatchQuotes(matchingSymbols);
+            List<Map<String, Object>> results = new ArrayList<>();
+
+            for (String s : matchingSymbols) {
+                Map<String, Object> quote = batch.get(s);
+                if (quote != null) {
+                    // Enrich search result with price/change
+                    Map<String, Object> result = new HashMap<>(quote);
+                    result.put("name", quote.getOrDefault("name", quote.getOrDefault("companyName", s)));
+                    results.add(result);
+                }
+            }
+
+            return results;
         } catch (Exception e) {
             log.error("Local search error: {}", e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private static final String TOP_MOVERS_KEY_PREFIX = "market:movers:";
+
+    public void updateTopMovers(String type, List<Map<String, Object>> data) {
+        if (type == null || data == null) return;
+        redisTemplate.opsForValue().set(TOP_MOVERS_KEY_PREFIX + type.toLowerCase(), data, 10, TimeUnit.MINUTES);
+    }
+
+    public List<Map<String, Object>> getTopMovers(String type) {
+        Object data = redisTemplate.opsForValue().get(TOP_MOVERS_KEY_PREFIX + type.toLowerCase());
+        if (data instanceof List) {
+            return (List<Map<String, Object>>) data;
+        }
+        return Collections.emptyList();
     }
 
     private String normalizeSymbol(String symbol) {

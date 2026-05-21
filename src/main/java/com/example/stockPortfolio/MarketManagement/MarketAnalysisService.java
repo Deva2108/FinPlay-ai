@@ -11,23 +11,44 @@ public class MarketAnalysisService {
 
     private final MarketGateway marketGateway;
     private final StockUniverseRepo stockUniverseRepo;
+    private final SymbolNormalizer symbolNormalizer;
 
     /**
      * READ ONLY FROM GATEWAY.
+     * PERFORMANCE FIX: Use SymbolNormalizer cache instead of Repo.findAll()
      */
     public List<Map<String, Object>> getMarketData() {
-        List<StockUniverse> universe = stockUniverseRepo.findAll();
-        List<String> symbols = universe.stream()
-                .map(StockUniverse::getSymbol)
-                .toList();
-        
+        Map<String, StockUniverse> universeMap = symbolNormalizer.getUniverseCache();
+        if (universeMap.isEmpty()) {
+            // Cold start fallback
+            List<StockUniverse> dbUniverse = stockUniverseRepo.findAll();
+            return enrich(dbUniverse);
+        }
+
+        List<String> symbols = new ArrayList<>(universeMap.keySet());
         Map<String, Map<String, Object>> quotes = marketGateway.getBatchQuotes(symbols);
 
+        return universeMap.values().stream()
+                .map(u -> {
+                    Map<String, Object> quote = quotes.get(u.getSymbol());
+                    if (quote != null) {
+                        Map<String, Object> enriched = new HashMap<>(quote);
+                        enriched.put("sector", u.getSector());
+                        enriched.put("marketCap", u.getMarketCap() != null ? u.getMarketCap() : "Mid Cap");
+                        return enriched;
+                    }
+                    return null;
+                })
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    private List<Map<String, Object>> enrich(List<StockUniverse> universe) {
+        List<String> symbols = universe.stream().map(StockUniverse::getSymbol).toList();
+        Map<String, Map<String, Object>> quotes = marketGateway.getBatchQuotes(symbols);
         return universe.stream()
                 .map(u -> {
-                    String symbol = u.getSymbol();
-                    Map<String, Object> quote = quotes.get(symbol);
-
+                    Map<String, Object> quote = quotes.get(u.getSymbol());
                     if (quote != null) {
                         Map<String, Object> enriched = new HashMap<>(quote);
                         enriched.put("sector", u.getSector());
@@ -41,6 +62,12 @@ public class MarketAnalysisService {
     }
 
     public List<Map<String, Object>> getGainers(String capFilter, String sectorFilter) {
+        // PERFORMANCE FIX: Try pre-calculated list from Redis first
+        if ((capFilter == null || capFilter.equalsIgnoreCase("all")) && (sectorFilter == null || sectorFilter.equalsIgnoreCase("all"))) {
+            List<Map<String, Object>> cached = marketGateway.getTopMovers("gainers");
+            if (!cached.isEmpty()) return cached;
+        }
+
         return getMarketData().stream()
                 .filter(m -> filterByCap(m, capFilter) && filterBySector(m, sectorFilter))
                 .sorted((a, b) -> Double.compare(
@@ -50,6 +77,12 @@ public class MarketAnalysisService {
     }
 
     public List<Map<String, Object>> getLosers(String capFilter, String sectorFilter) {
+        // PERFORMANCE FIX: Try pre-calculated list from Redis first
+        if ((capFilter == null || capFilter.equalsIgnoreCase("all")) && (sectorFilter == null || sectorFilter.equalsIgnoreCase("all"))) {
+            List<Map<String, Object>> cached = marketGateway.getTopMovers("losers");
+            if (!cached.isEmpty()) return cached;
+        }
+
         return getMarketData().stream()
                 .filter(m -> filterByCap(m, capFilter) && filterBySector(m, sectorFilter))
                 .sorted((a, b) -> Double.compare(
@@ -68,6 +101,10 @@ public class MarketAnalysisService {
     }
 
     public List<Map<String, Object>> getTrending() {
+        // PERFORMANCE FIX: Try pre-calculated list from Redis first
+        List<Map<String, Object>> cached = marketGateway.getTopMovers("trending");
+        if (!cached.isEmpty()) return cached;
+
         try {
             return getMarketData().stream()
                     .sorted((a, b) -> Double.compare(
@@ -108,9 +145,25 @@ public class MarketAnalysisService {
 
     public String getSectorForSymbol(String symbol) {
         if (symbol == null) return "Other";
-        return stockUniverseRepo.findBySymbol(symbol)
-                .map(StockUniverse::getSector)
-                .orElse("Other");
+        StockUniverse info = symbolNormalizer.getUniverseCache().get(symbol.toUpperCase());
+        return info != null ? info.getSector() : "Other";
+    }
+
+    /**
+     * Bulk variant of {@link #getSectorForSymbol(String)}. Returns a
+     * {@code Symbol -> StockUniverse} map built from the SymbolNormalizer cache.
+     * PERFORMANCE FIX: No longer hits the database.
+     */
+    public Map<String, StockUniverse> getUniverseBySymbols(Collection<String> symbols) {
+        if (symbols == null || symbols.isEmpty()) return Collections.emptyMap();
+        Map<String, StockUniverse> cache = symbolNormalizer.getUniverseCache();
+        Map<String, StockUniverse> result = new HashMap<>();
+        
+        for (String s : symbols) {
+            StockUniverse info = cache.get(s.toUpperCase());
+            if (info != null) result.put(info.getSymbol(), info);
+        }
+        return result;
     }
 
     public List<Map<String, String>> getFamousInsights(String symbol) {

@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -15,6 +16,10 @@ public class SymbolNormalizer {
 
     private final StockUniverseRepo stockUniverseRepo;
     private final Map<String, StockUniverse> universeCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public Map<String, StockUniverse> getUniverseCache() {
+        return Collections.unmodifiableMap(universeCache);
+    }
 
     @org.springframework.scheduling.annotation.Scheduled(fixedRate = 1800000) // 30 minutes
     public void refreshCache() {

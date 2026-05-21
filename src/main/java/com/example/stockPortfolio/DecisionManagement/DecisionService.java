@@ -148,9 +148,19 @@ public class DecisionService {
         List<com.example.stockPortfolio.HoldingsManagement.Transaction> txns = transactionRepo.findByUserId(userId);
         Map<String, Double> revenueBySector = new HashMap<>();
         
+        // PHASE 1 N+1 FIX: prefetch all sectors in one bulk query instead of per-transaction loop.
+        List<String> symbols = txns.stream()
+                .filter(t -> t.getType() == com.example.stockPortfolio.HoldingsManagement.Transaction.TransactionType.SELL)
+                .map(t -> t.getSymbol().toUpperCase())
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, com.example.stockPortfolio.MarketManagement.StockUniverse> universeMap = 
+                marketAnalysisService.getUniverseBySymbols(symbols);
+
         txns.stream().filter(t -> t.getType() == com.example.stockPortfolio.HoldingsManagement.Transaction.TransactionType.SELL)
             .forEach(t -> {
-                String sector = marketAnalysisService.getSectorForSymbol(t.getSymbol());
+                com.example.stockPortfolio.MarketManagement.StockUniverse universe = universeMap.get(t.getSymbol().toUpperCase());
+                String sector = universe != null ? universe.getSector() : "Other";
                 double amount = t.getPrice().multiply(t.getQuantity()).doubleValue();
                 revenueBySector.put(sector, revenueBySector.getOrDefault(sector, 0.0) + amount);
             });

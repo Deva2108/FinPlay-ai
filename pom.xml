@@ -43,6 +43,17 @@
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
 
+		<!--
+		  WebFlux is included only for the reactive WebClient (used by
+		  AlphaVantageService and any future non-blocking external calls).
+		  Spring Boot keeps Tomcat as the active server because starter-web
+		  is also present — webflux only provides the reactive HTTP client.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webflux</artifactId>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security</artifactId>

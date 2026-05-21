@@ -5,8 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 @Service
+@lombok.RequiredArgsConstructor
 @Slf4j
 public class InsightTextGenerator {
+
+    private final com.example.stockPortfolio.MarketManagement.SymbolNormalizer symbolNormalizer;
 
     public RichInsightDTO generate(
             String symbol,
@@ -148,7 +151,7 @@ public class InsightTextGenerator {
 
     private String generateIndiaImpact(String symbol, InsightPatternDetector.Pattern pattern,
                                       CoreDataExtractor.InsightContext ctx) {
-        boolean isIndian = symbol.endsWith(".NS") || symbol.endsWith(".BO") || symbol.contains("^");
+        boolean isIndian = symbolNormalizer.isIndian(symbol);
 
         if (isIndian) {
             return "Indian markets are driven by domestic growth, RBI policy, and FII flows. This stock reflects India's economic narrative.";
