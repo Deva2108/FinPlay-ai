@@ -703,6 +703,19 @@ public class MarketGateway {
         return Collections.emptyList();
     }
 
+    public void updateFullEnrichedUniverse(List<Map<String, Object>> data) {
+        if (data == null) return;
+        redisTemplate.opsForValue().set("market:universe:enriched", data, 5, TimeUnit.MINUTES);
+    }
+
+    public List<Map<String, Object>> getFullEnrichedUniverse() {
+        Object data = redisTemplate.opsForValue().get("market:universe:enriched");
+        if (data instanceof List) {
+            return (List<Map<String, Object>>) data;
+        }
+        return Collections.emptyList();
+    }
+
     private String normalizeSymbol(String symbol) {
         return symbolNormalizer.normalize(symbol);
     }

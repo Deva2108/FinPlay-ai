@@ -4,6 +4,7 @@ import {
   getHoldings, 
   executeTrade, 
   getUserInsights, 
+  syncAll,
   trackDecision as apiTrackDecision 
 } from '../services/api';
 
@@ -38,10 +39,6 @@ export function TradingProvider({ children }) {
 
   const refreshData = useCallback(async () => {
     const token = localStorage.getItem('token');
-    // Skip hydration for unauthenticated users and first-time users still in
-    // the onboarding flow. The Onboarding "finish" handler sets finplay_arena_done
-    // before navigating away, so post-onboarding callers (Portfolio mount, Login,
-    // executeBuy/executeSell) hydrate normally.
     const isFirstTime = !localStorage.getItem('finplay_arena_done');
     if (!token || isFirstTime) {
       setLoading(false);
@@ -50,17 +47,17 @@ export function TradingProvider({ children }) {
 
     setError(null);
     try {
-      const res = await getUserPortfolios();
-      const portfolioList = res?.data;
-      
-      if (Array.isArray(portfolioList) && portfolioList.length > 0) {
-        const primary = portfolioList[0];
-        setActivePortfolioId(primary.portfolioId);
-        setBalance(primary.balance || 100000);
+      // 1 aggregated call instead of 3 serial calls
+      const res = await syncAll();
+      const data = res?.data;
+
+      if (data) {
+        if (data.portfolios && data.portfolios.length > 0) {
+           setActivePortfolioId(data.portfolios[0].portfolioId);
+        }
+        setBalance(data.totalBalance || 100000);
         
-        const holdingsRes = await getHoldings(primary.portfolioId);
-        const holdingsList = holdingsRes?.data?.holdings || [];
-        
+        const holdingsList = data.holdings?.holdings || [];
         const mappedPortfolio = (Array.isArray(holdingsList) ? holdingsList : []).map(h => ({
           symbol: h?.symbol,
           name: h?.companyName || h?.symbol,
@@ -71,19 +68,19 @@ export function TradingProvider({ children }) {
           currentValue: (h?.currentPrice || 0) * (h?.quantity || 0),
           gainVal: h?.gain,
           gainPct: h?.gainPercentage,
-          meta: h?.meta // Carry over backend flags (isSimulated, etc)
+          meta: h?.meta
         }));
         
         setPortfolio(mappedPortfolio);
+        if (data.behaviorInsights) setUserInsights(data.behaviorInsights);
       }
-      await refreshInsights();
     } catch (error) {
-      console.error("Failed to fetch trading data", error);
+      console.error("Failed to sync application data", error);
       setError('Failed to load portfolio data.');
     } finally {
       setLoading(false);
     }
-  }, [refreshInsights]);
+  }, []);
 
   useEffect(() => {
     refreshData();

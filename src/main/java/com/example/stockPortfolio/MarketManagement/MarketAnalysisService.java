@@ -15,12 +15,16 @@ public class MarketAnalysisService {
 
     /**
      * READ ONLY FROM GATEWAY.
-     * PERFORMANCE FIX: Use SymbolNormalizer cache instead of Repo.findAll()
+     * PERFORMANCE FIX: Use cached enriched universe if available to avoid O(N) HashMap churn.
      */
     public List<Map<String, Object>> getMarketData() {
+        // 1. Try pre-calculated enriched universe first
+        List<Map<String, Object>> cachedUniverse = marketGateway.getFullEnrichedUniverse();
+        if (!cachedUniverse.isEmpty()) return cachedUniverse;
+
+        // 2. Build on-the-fly if cache is cold
         Map<String, StockUniverse> universeMap = symbolNormalizer.getUniverseCache();
         if (universeMap.isEmpty()) {
-            // Cold start fallback
             List<StockUniverse> dbUniverse = stockUniverseRepo.findAll();
             return enrich(dbUniverse);
         }
@@ -28,7 +32,7 @@ public class MarketAnalysisService {
         List<String> symbols = new ArrayList<>(universeMap.keySet());
         Map<String, Map<String, Object>> quotes = marketGateway.getBatchQuotes(symbols);
 
-        return universeMap.values().stream()
+        List<Map<String, Object>> freshData = universeMap.values().stream()
                 .map(u -> {
                     Map<String, Object> quote = quotes.get(u.getSymbol());
                     if (quote != null) {
@@ -41,6 +45,10 @@ public class MarketAnalysisService {
                 })
                 .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toList());
+        
+        // 3. Update cache for subsequent requests (TTL 5m managed by Gateway)
+        marketGateway.updateFullEnrichedUniverse(freshData);
+        return freshData;
     }
 
     private List<Map<String, Object>> enrich(List<StockUniverse> universe) {

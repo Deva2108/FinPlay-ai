@@ -25,6 +25,7 @@ public class PortfolioController {
     private final UserService userService;
     private final com.example.stockPortfolio.MarketManagement.MarketGateway marketGateway;
     private final com.example.stockPortfolio.AiManagement.service.AiService aiService;
+    private final com.example.stockPortfolio.HoldingsManagement.HoldingService holdingService;
 
     private User getLoggedInUser() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -46,6 +47,33 @@ public class PortfolioController {
     public ResponseEntity<ApiResponse<List<PortfolioDTO>>> getPortfolios() {
         PortfolioResponseDTO response = portfolioService.getPortfoliosByUserId(getLoggedInUser().getUserId());
         return ResponseEntity.ok(ApiResponse.ok(response.getResult(), "Portfolios fetched successfully"));
+    }
+
+    @GetMapping("/sync")
+    public ResponseEntity<ApiResponse<AggregatedSyncDTO>> syncAll() {
+        User user = getLoggedInUser();
+        Long userId = user.getUserId();
+        
+        List<PortfolioDTO> portfolios = portfolioService.getPortfoliosByUserId(userId).getResult();
+        
+        com.example.stockPortfolio.HoldingsManagement.HoldingResponseDTO holdings = null;
+        java.math.BigDecimal balance = java.math.BigDecimal.ZERO;
+        if (!portfolios.isEmpty()) {
+            PortfolioDTO primary = portfolios.get(0);
+            holdings = holdingService.getHoldingsWithDetails(userId, primary.getPortfolioId());
+            balance = primary.getBalance();
+        }
+        
+        Object insights = marketGateway.getUserInsight(userId, "behavior");
+
+        AggregatedSyncDTO sync = AggregatedSyncDTO.builder()
+                .portfolios(portfolios)
+                .holdings(holdings)
+                .behaviorInsights(insights)
+                .totalBalance(balance)
+                .build();
+                
+        return ResponseEntity.ok(ApiResponse.ok(sync, "Application state synchronized"));
     }
 
     /**

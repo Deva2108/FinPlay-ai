@@ -184,6 +184,11 @@ export const getPortfolio = async () => {
 
 export const getUserPortfolios = getPortfolio;
 
+export const syncAll = async () => {
+  const response = await api.get(`${API_ENDPOINTS.PORTFOLIO.BASE}/sync`);
+  return readApiEnvelope(response);
+};
+
 export const getPortfolioMentorAdvice = async (portfolioId) => {
   const response = await api.get(API_ENDPOINTS.PORTFOLIO.MENTOR(portfolioId));
   return readApiEnvelope(response);
