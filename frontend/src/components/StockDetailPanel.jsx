@@ -8,6 +8,7 @@ import ChartComponent from './ChartComponent';
 import BuyModal from './GameMode/BuyModal';
 import InsightPanel from './InsightPanel';
 import DataBadge from './DataBadge';
+import InfoTooltip from './InfoTooltip';
 
 const contentVariants = {
   hidden: { opacity: 0, y: 20 },
