@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, TrendingUp, TrendingDown, Target, Shield, Zap, Info, Briefcase, Trash2, Plus } from 'lucide-react';
-import { formatPrice } from '../utils/formatters';
+import { formatPrice, safePct } from '../utils/formatters';
 import { useTrading } from '../context/TradingContext';
 import { getLearningInsight } from '../utils/learningEngine';
 import MicroLearningCard from './MicroLearningCard';
@@ -46,7 +46,7 @@ const PortfolioStockPanel = ({ isOpen, onClose, stock, marketCode, onAction }) =
                 </h3>
                 <div className="flex items-center gap-3">
                   <span className="text-xl font-bold text-slate-200">{formatPrice(stock.currentValue / stock.quantity, stock.currency)}</span>
-                  <span className={`text-sm font-black ${accentColor}`}>{isProfit ? '+' : ''}{stock.gainPct.toFixed(2)}%</span>
+                  <span className={`text-sm font-black ${accentColor}`}>{isProfit ? '+' : ''}{safePct(stock.gainPct)}%</span>
                 </div>
               </div>
               <button onClick={onClose} className="p-3 text-slate-400 hover:text-white bg-white/5 rounded-2xl transition-all"><X size={24} /></button>

@@ -45,3 +45,14 @@ export const formatPrice = (price, currencyCode = 'INR') => {
   }
 };
 
+/**
+ * Safely converts a value to a fixed-point percentage string.
+ * Prevents UI crashes when gain/progress values are null or undefined.
+ */
+export const safePct = (value, decimals = 2) => {
+  const num = parseFloat(value);
+  if (isNaN(num)) return '0';
+  return num.toFixed(decimals);
+};
+
+

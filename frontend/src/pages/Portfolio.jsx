@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getPortfolioMentorAdvice, getArchetype } from '../services/api';
-import { formatPrice } from '../utils/formatters';
+import { formatPrice, safePct } from '../utils/formatters';
 import { useTrading } from '../context/TradingContext';
 import { useStockPanel } from '../context/StockPanelContext';
 import PortfolioSuggestionCard from '../components/PortfolioSuggestionCard';
@@ -278,7 +278,7 @@ export default function Portfolio() {
                   <div className="flex items-center gap-2">
                     <InfoTooltip concept="yield">
                       <span className="text-base font-medium text-slate-500">
-                        {totalGain >= 0 ? '+' : ''}{totalYield.toFixed(2)}%
+                        {totalGain >= 0 ? '+' : ''}{safePct(totalYield)}%
                       </span>
                     </InfoTooltip>
                     <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Returns</span>
@@ -325,7 +325,7 @@ export default function Portfolio() {
                       <div className="flex items-center justify-between w-full sm:w-auto gap-8 text-right">
                         <div>
                           <p className={`text-lg font-semibold tabular-nums ${stock.status === 'profit' ? 'text-emerald-400' : 'text-rose-400'}`}>{stock.status === 'profit' ? '+' : ''}{formatPrice(stock.gainVal, stock.currency || 'INR')}</p>
-                          <p className={`text-sm font-medium ${stock.status === 'profit' ? 'text-emerald-500' : 'text-rose-500'}`}>{stock.gainPct.toFixed(2)}% Returns</p>
+                          <p className={`text-sm font-medium ${stock.status === 'profit' ? 'text-emerald-500' : 'text-rose-500'}`}>{safePct(stock.gainPct)}% Returns</p>
                         </div>
                         <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                            <button onClick={() => openStockPanel(stock)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[10px] font-black uppercase transition-all shadow-lg">Buy</button>

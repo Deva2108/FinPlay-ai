@@ -291,18 +291,30 @@ public class MarketGateway {
         }
 
         List<String> needFallback = new ArrayList<>();
-        for (int i = 0; i < needRedis.size(); i++) {
-            Object data = (stockValues != null && i < stockValues.size()) ? stockValues.get(i) : null;
-            if (data instanceof Map) {
-                Map<String, Object> quote = (Map<String, Object>) data;
-                results.put(originalBySymbol.get(needRedis.get(i)), quote);
-                // Warm L1 for indices so the next request skips Redis entirely.
-                if (indexCache != null && symbolNormalizer.isIndex(needRedis.get(i))) {
-                    indexCache.put(needRedis.get(i), quote);
+        if (stockValues != null) {
+            for (int i = 0; i < Math.min(needRedis.size(), stockValues.size()); i++) {
+                Object data = stockValues.get(i);
+                String normalized = needRedis.get(i);
+                if (data instanceof Map) {
+                    Map<String, Object> quote = (Map<String, Object>) data;
+                    results.put(originalBySymbol.get(normalized), quote);
+                    // Warm L1 for indices so the next request skips Redis entirely.
+                    if (indexCache != null && symbolNormalizer.isIndex(normalized)) {
+                        indexCache.put(normalized, quote);
+                    }
+                } else {
+                    needFallback.add(normalized);
                 }
-            } else {
-                needFallback.add(needRedis.get(i));
             }
+            // Handle missing items if list is shorter
+            if (stockValues.size() < needRedis.size()) {
+                for (int i = stockValues.size(); i < needRedis.size(); i++) {
+                    needFallback.add(needRedis.get(i));
+                }
+            }
+        } else {
+            // MGET failed completely
+            needFallback.addAll(needRedis);
         }
 
         // Pass 3: ONE Redis MGET on last_close:* for everything still missing.
