@@ -24,6 +24,7 @@ import InsightPanel from '../components/InsightPanel';
 import IndexCard from '../components/IndexCard';
 import MarketInsightPanel from '../components/MarketInsightPanel';
 import NextEdgeCard from '../components/NextEdgeCard';
+import WidgetErrorBoundary from '../components/WidgetErrorBoundary';
 
  
 export default function Dashboard() {
@@ -140,8 +141,8 @@ export default function Dashboard() {
   }, [marketMode, activePortfolioId, portfolioLoading]);
 
   const recentlyViewed = useMemo(() => (allRecentlyViewed || []).filter(s => s?.market === marketCode), [allRecentlyViewed, marketCode]);
-  const decisions = useMemo(() => (allDecisions || []).filter(d => d && d.stock && (d.stock.currency === (marketCode === 'IN' ? 'INR' : 'INR'))), [allDecisions, marketCode]);
-  const missedOpportunities = useMemo(() => (allMissed || []).filter(d => d.action === 'SKIP').slice(0, 3), [allMissed, marketCode]);
+  const decisions = useMemo(() => (allDecisions || []).filter(d => d?.stock && (d?.stock?.currency === (marketCode === 'IN' ? 'INR' : 'INR'))), [allDecisions, marketCode]);
+  const missedOpportunities = useMemo(() => (allMissed || []).filter(d => d?.action === 'SKIP').slice(0, 3), [allMissed, marketCode]);
 
   const objectives = useMemo(() => [
     { title: "Daily Arena Clear", progress: (decisions?.length || 0) >= 5 ? 100 : ((decisions?.length || 0) / 5) * 100, icon: <Target size={12}/> },
@@ -334,10 +335,12 @@ export default function Dashboard() {
            <div className="lg:col-span-6">
               <section className="bg-slate-900/40 p-1 rounded-2xl border border-slate-800/50">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-1">
+                  <WidgetErrorBoundary name="Market Indices">
                   {(Array.isArray(activeData?.indices) ? activeData.indices : []).map((idx) => (
                     <IndexCard key={idx.symbol} {...idx} onClick={() => handleIndexClick(idx)} />
                   ))}
                   {activeData.indices.length === 0 && <div className="col-span-3 p-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest animate-pulse">Loading Indices...</div>}
+                  </WidgetErrorBoundary>
                 </div>
               </section>
            </div>
@@ -370,6 +373,7 @@ export default function Dashboard() {
             </section>
             <section className="space-y-4">
                 <div className="flex items-center gap-2 px-2">{recentlyViewed.length > 0 ? <Activity size={16} className="text-blue-500" /> : <Zap size={16} className="text-purple-500" />}<h3 className="text-[10px] font-black text-white uppercase tracking-widest">{recentlyViewed.length > 0 ? "Recently Viewed" : "Your Next Move"}</h3></div>
+                <WidgetErrorBoundary name="Recently Viewed">
                 {recentlyViewed.length > 0 ? (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {((recentlyViewed || []).slice(0, 4)).map((stock, i) => (
@@ -380,6 +384,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 ) : ( <NextEdgeCard /> )}
+                </WidgetErrorBoundary>
             </section>
           </div>
 
@@ -438,7 +443,7 @@ export default function Dashboard() {
                <div className="space-y-4">
                   {objectives.map((obj, i) => (
                     <div key={i} className="space-y-1.5">
-                       <div className="flex justify-between text-[9px] font-bold"><span className="text-slate-400 flex items-center gap-2">{obj?.icon} {obj?.title}</span><span className="text-blue-400">{obj?.progress?.toFixed(0)}%</span></div>
+                       <div className="flex justify-between text-[9px] font-bold"><span className="text-slate-400 flex items-center gap-2">{obj?.icon} {obj?.title}</span><span className="text-blue-400">{safePct(obj?.progress, 0)}%</span></div>
                        <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: `${obj?.progress}%` }} /></div>
                     </div>
                   ))}

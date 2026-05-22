@@ -51,8 +51,44 @@ export const formatPrice = (price, currencyCode = 'INR') => {
  */
 export const safePct = (value, decimals = 2) => {
   const num = parseFloat(value);
+  if (isNaN(num)) return '0.00';
+  try {
+    return num.toFixed(decimals);
+  } catch (e) {
+    return '0.00';
+  }
+};
+
+/**
+ * Safely formats a number with compact notation (e.g., 1.2M)
+ */
+export const safeCompactNumber = (value) => {
+  const num = parseFloat(value);
+  if (isNaN(num)) return '---';
+  try {
+    return new Intl.NumberFormat('en-US', {
+      notation: "compact",
+      maximumFractionDigits: 1
+    }).format(num);
+  } catch (e) {
+    return num.toString();
+  }
+};
+
+/**
+ * Safely parses and formats any number
+ */
+export const safeNumber = (value, decimals = 2) => {
+  const num = parseFloat(value);
   if (isNaN(num)) return '0';
-  return num.toFixed(decimals);
+  try {
+    return num.toLocaleString(undefined, {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    });
+  } catch (e) {
+    return '0';
+  }
 };
 
 

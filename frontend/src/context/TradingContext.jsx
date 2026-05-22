@@ -228,10 +228,17 @@ export function TradingProvider({ children }) {
     }
   }, [activePortfolioId, balance, portfolio, refreshData]);
 
+  const actions = useMemo(() => ({
+    executeBuy, executeSell, recordDecision, addMissedOpportunity, recordGameResult: syncGameResult, refreshData, refreshInsights
+  }), [executeBuy, executeSell, recordDecision, addMissedOpportunity, syncGameResult, refreshData, refreshInsights]);
+
+  const state = useMemo(() => ({
+    balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading, error, activePortfolioId
+  }), [balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading, error, activePortfolioId]);
+
   const contextValue = useMemo(() => ({
-    balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading, error,
-    executeBuy, executeSell, recordDecision, addMissedOpportunity, recordGameResult: syncGameResult, refreshData, refreshInsights, activePortfolioId
-  }), [balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading, error, executeBuy, executeSell, recordDecision, addMissedOpportunity, syncGameResult, refreshData, refreshInsights, activePortfolioId]);
+    ...state, ...actions
+  }), [state, actions]);
 
   return <TradingContext.Provider value={contextValue}>{children}</TradingContext.Provider>;
 }

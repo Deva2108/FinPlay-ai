@@ -24,7 +24,9 @@ export const getLearningInsight = (userData) => {
 
   // Rule 2: Over-Concentration (Risk Management)
   if (holdings.length > 0 && totalCurrentValue > 0) {
-    const maxWeight = Math.max(...holdings.map(h => (h.currentValue / totalCurrentValue) * 100));
+    // PERFORMANCE FIX: Prevent RangeError by checking if holdings exists and is not empty
+    const validHoldings = Array.isArray(holdings) ? holdings : [];
+    const maxWeight = validHoldings.length === 0 ? 0 : Math.max(...validHoldings.map(h => ((h?.currentValue || 0) / (totalCurrentValue || 1)) * 100));
     if (maxWeight > 70) {
       return {
         topic: "Diversification",
