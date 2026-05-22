@@ -81,6 +81,40 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
+interface RouteBoundaryState { hasError: boolean }
+class RouteErrorBoundary extends Component<{ children: ReactNode; name?: string }, RouteBoundaryState> {
+  constructor(props: { children: ReactNode; name?: string }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError(): RouteBoundaryState { return { hasError: true }; }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error(`Route Failure (${this.props.name || 'unknown'}):`, error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-[60vh] flex items-center justify-center p-6">
+          <div className="bg-slate-900/60 border border-rose-500/20 rounded-3xl p-8 max-w-md text-center space-y-4">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+              <AlertTriangle size={28} className="text-rose-500" />
+            </div>
+            <h3 className="text-lg font-black text-white uppercase tracking-tight">{this.props.name || 'Page'} Unavailable</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">Sync interrupted on this section. Other features remain online.</p>
+            <button
+              onClick={() => this.setState({ hasError: false })}
+              className="px-5 py-2 bg-white text-slate-950 rounded-xl text-[10px] font-black uppercase tracking-widest"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function PrivateRoute({ children }: { children: ReactNode }) {
   const token = localStorage.getItem('token');
   return token ? <>{children}</> : <Navigate to="/login" replace />;
@@ -124,13 +158,13 @@ export default function App() {
                         </Layout>
                       </PrivateRoute>
                     } />
-                    <Route path="/market" element={<PrivateRoute><Layout><LiveMarket /></Layout></PrivateRoute>} />
-                    <Route path="/portfolio" element={<PrivateRoute><Layout><Portfolio /></Layout></PrivateRoute>} />
-                    <Route path="/vault" element={<PrivateRoute><Layout><Vault /></Layout></PrivateRoute>} />
-                    <Route path="/history" element={<PrivateRoute><Layout><Decisions /></Layout></PrivateRoute>} />
-                    <Route path="/insights" element={<PrivateRoute><Layout><Insights /></Layout></PrivateRoute>} />
-                    <Route path="/stock/:symbol" element={<PrivateRoute><Layout><StockDetails /></Layout></PrivateRoute>} />
-                    <Route path="/dashboard" element={<PrivateRoute><Layout><Dashboard /></Layout></PrivateRoute>} />
+                    <Route path="/market" element={<PrivateRoute><Layout><RouteErrorBoundary name="Market"><LiveMarket /></RouteErrorBoundary></Layout></PrivateRoute>} />
+                    <Route path="/portfolio" element={<PrivateRoute><Layout><RouteErrorBoundary name="Portfolio"><Portfolio /></RouteErrorBoundary></Layout></PrivateRoute>} />
+                    <Route path="/vault" element={<PrivateRoute><Layout><RouteErrorBoundary name="Vault"><Vault /></RouteErrorBoundary></Layout></PrivateRoute>} />
+                    <Route path="/history" element={<PrivateRoute><Layout><RouteErrorBoundary name="History"><Decisions /></RouteErrorBoundary></Layout></PrivateRoute>} />
+                    <Route path="/insights" element={<PrivateRoute><Layout><RouteErrorBoundary name="Insights"><Insights /></RouteErrorBoundary></Layout></PrivateRoute>} />
+                    <Route path="/stock/:symbol" element={<PrivateRoute><Layout><RouteErrorBoundary name="Stock"><StockDetails /></RouteErrorBoundary></Layout></PrivateRoute>} />
+                    <Route path="/dashboard" element={<PrivateRoute><Layout><RouteErrorBoundary name="Dashboard"><Dashboard /></RouteErrorBoundary></Layout></PrivateRoute>} />
 
                     {/* Auth (public) */}
                     <Route path="/login" element={<Login />} />

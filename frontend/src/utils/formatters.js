@@ -1,11 +1,17 @@
 /**
- * Formats a numeric price into a localized currency string.
+ * Formats a numeric value into a localized string.
+ * Supports both currency (for stocks) and point-based (for indices) formatting.
  * High Reliability: Handles invalid ISO codes and prevents UI crashes via try-catch.
  */
-export const formatPrice = (price, currencyCode = 'INR') => {
-  const numericPrice = typeof price === 'string' ? parseFloat(price.replace(/,/g, '')) : price;
-  
-  if (isNaN(numericPrice) || numericPrice === null || numericPrice === undefined) {
+export const formatPrice = (price, currencyCode = 'INR', showSymbol = true) => {
+  let numericPrice;
+  try {
+    numericPrice = typeof price === 'string' ? parseFloat(price.replace(/,/g, '')) : Number(price);
+  } catch (e) {
+    return '---';
+  }
+
+  if (price === null || price === undefined || !Number.isFinite(numericPrice)) {
     return '---';
   }
 
@@ -27,21 +33,27 @@ export const formatPrice = (price, currencyCode = 'INR') => {
 
   // 2. Production-safe formatting
   try {
-    return new Intl.NumberFormat(isoCode === 'INR' ? 'en-IN' : 'en-US', {
-      style: 'currency',
-      currency: isoCode,
+    const options = {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(numericPrice);
+    };
+
+    if (showSymbol) {
+      options.style = 'currency';
+      options.currency = isoCode;
+    }
+
+    return new Intl.NumberFormat(isoCode === 'INR' ? 'en-IN' : 'en-US', options).format(numericPrice);
   } catch (err) {
     console.error(`Formatting error for currency: ${isoCode}`, err);
     
     // 3. Ultra-safe fallback: basic numeric string with symbol
     const symbol = isoCode === 'USD' ? '$' : '₹';
-    return `${symbol}${numericPrice.toLocaleString(undefined, {
+    const formattedNum = numericPrice.toLocaleString(undefined, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
-    })}`;
+    });
+    return showSymbol ? `${symbol}${formattedNum}` : formattedNum;
   }
 };
 
@@ -50,13 +62,27 @@ export const formatPrice = (price, currencyCode = 'INR') => {
  * Prevents UI crashes when gain/progress values are null or undefined.
  */
 export const safePct = (value, decimals = 2) => {
-  const num = parseFloat(value);
-  if (isNaN(num)) return '0.00';
+  const num = typeof value === 'number' ? value : parseFloat(value);
+  if (!Number.isFinite(num)) return '0.00';
+  const d = Number.isFinite(decimals) ? Math.max(0, Math.min(20, decimals)) : 2;
   try {
-    return num.toFixed(decimals);
+    return num.toFixed(d);
   } catch (e) {
     return '0.00';
   }
+};
+
+/**
+ * Safe array max — avoids Math.max(...[]) returning -Infinity which can crash UIs.
+ */
+export const safeMax = (arr, fallback = 0) => {
+  if (!Array.isArray(arr) || arr.length === 0) return fallback;
+  let max = -Infinity;
+  for (const v of arr) {
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return Number.isFinite(max) ? max : fallback;
 };
 
 /**

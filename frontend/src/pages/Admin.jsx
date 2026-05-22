@@ -4,6 +4,7 @@ import {
   adminResetPassword, adminAdjustBalance, adminLeaderboard, adminBonusEvent,
   adminStats, adminAudit,
 } from '../services/api';
+import { formatPrice } from '../utils/formatters';
 
 /**
  * /admin — single-page admin console.

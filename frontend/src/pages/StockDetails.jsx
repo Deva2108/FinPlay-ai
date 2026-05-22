@@ -60,7 +60,7 @@ export default function StockDetails() {
     setLoadingChart(true);
     try {
       const res = await getChartData(symbol, timeframe);
-      setChart(res?.data?.chartData || []);
+      setChart(res?.data?.data || []);
     } finally {
       setLoadingChart(false);
     }
@@ -69,6 +69,7 @@ export default function StockDetails() {
   useEffect(() => { fetchData(); }, [symbol]);
   useEffect(() => { fetchChart(); }, [symbol, timeframe]);
 
+  const isIndex = symbol?.startsWith('^') || symbol === 'SPY' || symbol === 'QQQ' || symbol === 'DIA';
   const isUp = stock?.change >= 0;
   const currency = stock?.currency || 'INR';
 
@@ -112,8 +113,8 @@ export default function StockDetails() {
               <div className="bg-slate-900/40 rounded-[3rem] border border-white/5 p-8 sm:p-10 relative overflow-hidden group">
                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-10">
                     <div>
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Price</p>
-                      <p className="text-5xl font-black text-white tracking-tighter">{formatPrice(stock?.price, currency)}</p>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{isIndex ? 'Points' : 'Price'}</p>
+                      <p className="text-5xl font-black text-white tracking-tighter">{formatPrice(stock?.price, currency, !isIndex)}</p>
                       <div className="flex items-center gap-2 mt-2">
                          <InfoTooltip concept="pnl">
                             <p className="text-[9px] font-bold text-blue-400/80 uppercase tracking-widest">Master P&L logic to build edge</p>
@@ -128,7 +129,7 @@ export default function StockDetails() {
                  </div>
                  <div className="h-[400px] w-full relative">
                     {loadingChart && <div className="absolute inset-0 z-10 bg-[#020617]/40 backdrop-blur-sm flex items-center justify-center rounded-3xl"><Zap size={32} className="text-blue-500 animate-spin" /></div>}
-                    <ChartComponent data={chart} meta={stock?.meta} color={isUp ? '#10b981' : '#f43f5e'} height={400} />
+                    <ChartComponent data={chart} meta={stock?.meta} color={isUp ? '#10b981' : '#f43f5e'} height={400} isIndex={isIndex} />
                  </div>
               </div>
             </div>

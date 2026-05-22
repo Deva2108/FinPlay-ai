@@ -146,4 +146,4 @@ const NextEdgeCard = () => {
   );
 };
 
-export default NextEdgeCard;
+export default React.memo(NextEdgeCard);

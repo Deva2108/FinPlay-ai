@@ -4,15 +4,14 @@
  */
 
 export const getLearningInsight = (userData) => {
-  const { 
-    decisions = [], 
-    missedOpportunities = [], 
-    holdings = [], 
-    totalCurrentValue = 0
-  } = userData;
+  const safeUserData = userData || {};
+  const decisions = Array.isArray(safeUserData.decisions) ? safeUserData.decisions : [];
+  const missedOpportunities = Array.isArray(safeUserData.missedOpportunities) ? safeUserData.missedOpportunities : [];
+  const holdings = Array.isArray(safeUserData.holdings) ? safeUserData.holdings : [];
+  const totalCurrentValue = Number.isFinite(safeUserData.totalCurrentValue) ? safeUserData.totalCurrentValue : 0;
 
   // Rule 1: Missing Momentum (Too Cautious)
-  const highConfidenceSkips = missedOpportunities.filter(opp => parseFloat(opp.potentialGain) > 5).length;
+  const highConfidenceSkips = missedOpportunities.filter(opp => parseFloat(opp?.potentialGain) > 5).length;
   if (highConfidenceSkips >= 2) {
     return {
       topic: "Buying the Trend",
@@ -24,9 +23,14 @@ export const getLearningInsight = (userData) => {
 
   // Rule 2: Over-Concentration (Risk Management)
   if (holdings.length > 0 && totalCurrentValue > 0) {
-    // PERFORMANCE FIX: Prevent RangeError by checking if holdings exists and is not empty
-    const validHoldings = Array.isArray(holdings) ? holdings : [];
-    const maxWeight = validHoldings.length === 0 ? 0 : Math.max(...validHoldings.map(h => ((h?.currentValue || 0) / (totalCurrentValue || 1)) * 100));
+    // Safe scan — avoids RangeError from Math.max(...emptyArray) and NaN propagation.
+    let maxWeight = 0;
+    for (const h of holdings) {
+      const cv = Number(h?.currentValue);
+      if (!Number.isFinite(cv)) continue;
+      const w = (cv / (totalCurrentValue || 1)) * 100;
+      if (Number.isFinite(w) && w > maxWeight) maxWeight = w;
+    }
     if (maxWeight > 70) {
       return {
         topic: "Diversification",
@@ -38,7 +42,7 @@ export const getLearningInsight = (userData) => {
   }
 
   // Rule 3: Holding Losses (Stop Loss)
-  const losingTrades = holdings.filter(h => h.gainPct < -5);
+  const losingTrades = holdings.filter(h => Number.isFinite(h?.gainPct) && h.gainPct < -5);
   if (losingTrades.length >= 2) {
     return {
       topic: "Protecting Capital",
@@ -50,7 +54,7 @@ export const getLearningInsight = (userData) => {
 
   // Rule 4: Impulsive Buying (Overtrading)
   const recentDecisions = decisions.slice(0, 10);
-  const buyCount = recentDecisions.filter(d => d.action === 'buy').length;
+  const buyCount = recentDecisions.filter(d => d?.action === 'buy').length;
   if (buyCount > 8 && recentDecisions.length >= 8) {
     return {
       topic: "Being Selective",
@@ -61,7 +65,7 @@ export const getLearningInsight = (userData) => {
   }
 
   // Rule 5: Profit Taking (Knowing when to exit)
-  const highProfitHoldings = holdings.filter(h => h.gainPct > 15);
+  const highProfitHoldings = holdings.filter(h => Number.isFinite(h?.gainPct) && h.gainPct > 15);
   if (highProfitHoldings.length >= 2) {
     return {
       topic: "Booking Profits",
@@ -72,7 +76,7 @@ export const getLearningInsight = (userData) => {
   }
 
   // Rule 6: Market Timing Bias
-  const bearMarketBuys = decisions.filter(d => d.marketMode === 'BEAR' && d.action === 'buy').length;
+  const bearMarketBuys = decisions.filter(d => d?.marketMode === 'BEAR' && d?.action === 'buy').length;
   if (bearMarketBuys > 3) {
     return {
       topic: "Market Trends",

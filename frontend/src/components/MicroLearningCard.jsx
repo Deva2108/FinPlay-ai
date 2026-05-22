@@ -43,4 +43,4 @@ const MicroLearningCard = ({ insight, variant = "default" }) => {
   );
 };
 
-export default MicroLearningCard;
+export default React.memo(MicroLearningCard);

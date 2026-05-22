@@ -15,7 +15,6 @@ import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSeriali
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -45,11 +44,11 @@ public class CacheConfig {
      */
     @Bean
     @Primary
-    public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
-        // Configure JSON Serializer
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.registerModule(new JavaTimeModule());
-        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer(mapper);
+    public CacheManager cacheManager(RedisConnectionFactory connectionFactory, ObjectMapper primaryObjectMapper) {
+        // Reuse Spring's primary ObjectMapper instead of allocating a fresh one
+        // (avoids a heavy ObjectMapper init during startup; JavaTimeModule is
+        // already registered by Spring Boot's Jackson auto-config).
+        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer(primaryObjectMapper);
 
         // Standard config: JSON values, String keys
         RedisCacheConfiguration standardConfig = RedisCacheConfiguration.defaultCacheConfig()

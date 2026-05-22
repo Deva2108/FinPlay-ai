@@ -7,6 +7,7 @@ import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -20,13 +21,26 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @Configuration
 @EnableWebSecurity
 @org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity(prePostEnabled = true)
-@lombok.RequiredArgsConstructor
 public class SecurityConfig {
 
     private final JwtRequestFilter jwtRequestFilter;
     private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
     private final LoginRateLimitFilter loginRateLimitFilter;
     private final GlobalApiRateLimitFilter globalApiRateLimitFilter;
+
+    // @Lazy on request-time filters — these are only invoked per HTTP request,
+    // so deferring their full instantiation lets the SecurityFilterChain bean
+    // and Tomcat port-binding initialize without waiting on filter dependencies
+    // (Redis-backed rate limiter, JWT util chain). Cuts startup time on Render.
+    public SecurityConfig(@Lazy JwtRequestFilter jwtRequestFilter,
+                          JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint,
+                          @Lazy LoginRateLimitFilter loginRateLimitFilter,
+                          @Lazy GlobalApiRateLimitFilter globalApiRateLimitFilter) {
+        this.jwtRequestFilter = jwtRequestFilter;
+        this.jwtAuthenticationEntryPoint = jwtAuthenticationEntryPoint;
+        this.loginRateLimitFilter = loginRateLimitFilter;
+        this.globalApiRateLimitFilter = globalApiRateLimitFilter;
+    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -101,7 +115,7 @@ public class SecurityConfig {
      */
     @Bean
     public org.springframework.boot.web.servlet.FilterRegistrationBean<LoginRateLimitFilter>
-            disableLoginRateLimitAutoRegistration(LoginRateLimitFilter f) {
+            disableLoginRateLimitAutoRegistration(@Lazy LoginRateLimitFilter f) {
         var reg = new org.springframework.boot.web.servlet.FilterRegistrationBean<>(f);
         reg.setEnabled(false);
         return reg;
@@ -109,7 +123,7 @@ public class SecurityConfig {
 
     @Bean
     public org.springframework.boot.web.servlet.FilterRegistrationBean<GlobalApiRateLimitFilter>
-            disableGlobalApiRateLimitAutoRegistration(GlobalApiRateLimitFilter f) {
+            disableGlobalApiRateLimitAutoRegistration(@Lazy GlobalApiRateLimitFilter f) {
         var reg = new org.springframework.boot.web.servlet.FilterRegistrationBean<>(f);
         reg.setEnabled(false);
         return reg;
@@ -117,7 +131,7 @@ public class SecurityConfig {
 
     @Bean
     public org.springframework.boot.web.servlet.FilterRegistrationBean<JwtRequestFilter>
-            disableJwtRequestFilterAutoRegistration(JwtRequestFilter f) {
+            disableJwtRequestFilterAutoRegistration(@Lazy JwtRequestFilter f) {
         var reg = new org.springframework.boot.web.servlet.FilterRegistrationBean<>(f);
         reg.setEnabled(false);
         return reg;

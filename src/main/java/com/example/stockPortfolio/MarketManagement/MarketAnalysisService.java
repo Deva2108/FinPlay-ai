@@ -36,7 +36,11 @@ public class MarketAnalysisService {
                 .map(u -> {
                     Map<String, Object> quote = quotes.get(u.getSymbol());
                     if (quote != null) {
-                        Map<String, Object> enriched = new HashMap<>(quote);
+                        // Pre-size to avoid HashMap rehash; only copy when the quote
+                        // does not already carry sector/marketCap metadata.
+                        if (quote.containsKey("sector") && quote.containsKey("marketCap")) return quote;
+                        Map<String, Object> enriched = new HashMap<>(quote.size() + 2);
+                        enriched.putAll(quote);
                         enriched.put("sector", u.getSector());
                         enriched.put("marketCap", u.getMarketCap() != null ? u.getMarketCap() : "Mid Cap");
                         return enriched;
@@ -58,7 +62,11 @@ public class MarketAnalysisService {
                 .map(u -> {
                     Map<String, Object> quote = quotes.get(u.getSymbol());
                     if (quote != null) {
-                        Map<String, Object> enriched = new HashMap<>(quote);
+                        // Pre-size to avoid HashMap rehash; only copy when the quote
+                        // does not already carry sector/marketCap metadata.
+                        if (quote.containsKey("sector") && quote.containsKey("marketCap")) return quote;
+                        Map<String, Object> enriched = new HashMap<>(quote.size() + 2);
+                        enriched.putAll(quote);
                         enriched.put("sector", u.getSector());
                         enriched.put("marketCap", u.getMarketCap() != null ? u.getMarketCap() : "Mid Cap");
                         return enriched;

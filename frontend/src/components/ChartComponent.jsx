@@ -1,47 +1,74 @@
+import React, { useMemo, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { formatPrice } from '../utils/formatters';
 import DataBadge from './DataBadge';
 import { useMarket } from '../context/MarketContext';
 
-export default function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointClick }) {
-  if (!data || data.length === 0) {
+function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointClick, isIndex = false }) {
+  const hasData = Array.isArray(data) && data.length > 0;
+  const currency = meta?.currency || (hasData ? data[0]?.currency : null) || 'INR';
+
+  // Memoize the per-point transformation — was rebuilt on every render
+  // (tooltip hover, resize, parent state changes), causing chart stutter.
+  const processedData = useMemo(() => {
+    if (!hasData) return [];
+    return data.map((d, index) => {
+      const rawTime = d.date || d.time || d.timestamp;
+      let date;
+      if (typeof rawTime === 'string') {
+        date = new Date(rawTime);
+      } else {
+        date = rawTime ? new Date(rawTime > 10000000000 ? rawTime : rawTime * 1000) : new Date();
+      }
+      const value = d.value || d.close || 0;
+      return {
+        ...d,
+        value,
+        formattedTime: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        formattedDate: date.toLocaleDateString([], { month: 'short', day: 'numeric' }),
+        fullDate: date.toLocaleString(),
+        index
+      };
+    });
+  }, [data, hasData]);
+
+  // Bounds computed once per dataset — single O(n) pass, avoids
+  // Math.min/max(...spread) which is O(n) AND allocates a temporary array.
+  const { min, max, padding, isDeep, xAxisKey } = useMemo(() => {
+    if (processedData.length === 0) {
+      return { min: 0, max: 0, padding: 0, isDeep: false, xAxisKey: 'formattedTime' };
+    }
+    let lo = Infinity, hi = -Infinity;
+    for (const p of processedData) {
+      const v = p.value;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    if (!Number.isFinite(lo)) lo = 0;
+    if (!Number.isFinite(hi)) hi = 0;
+    const deep = processedData.length > 30;
+    return {
+      min: lo,
+      max: hi,
+      padding: (hi - lo) * 0.15,
+      isDeep: deep,
+      xAxisKey: deep ? 'formattedDate' : 'formattedTime'
+    };
+  }, [processedData]);
+
+  const handleChartClick = useCallback((state) => {
+    if (onPointClick && state?.activePayload) onPointClick(state.activePayload[0].payload);
+  }, [onPointClick]);
+
+  const yAxisFormatter = useCallback((v) => formatPrice(v, currency, !isIndex), [currency, isIndex]);
+
+  if (!hasData) {
     return (
       <div style={{ height }} className="w-full flex items-center justify-center text-slate-500 font-bold uppercase text-[10px] tracking-[0.2em] bg-slate-900/40 rounded-3xl border border-white/5 shadow-inner">
         Synchronizing Market Link...
       </div>
     );
   }
-
-  const currency = meta?.currency || data[0]?.currency || 'INR';
-
-  const processedData = (data || []).map((d, index) => {
-    const rawTime = d.date || d.time || d.timestamp;
-    let date;
-    if (typeof rawTime === 'string') {
-      date = new Date(rawTime);
-    } else {
-      date = rawTime ? new Date(rawTime > 10000000000 ? rawTime : rawTime * 1000) : new Date();
-    }
-
-    const value = d.value || d.close || 0;
-
-    return {
-      ...d,
-      value,
-      formattedTime: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      formattedDate: date.toLocaleDateString([], { month: 'short', day: 'numeric' }),
-      fullDate: date.toLocaleString(),
-      index
-    };
-  });
-
-  const isDeep = processedData.length > 30;
-  const xAxisKey = isDeep ? "formattedDate" : "formattedTime";
-
-  const values = processedData.map(d => d.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const padding = (max - min) * 0.15;
 
   const CustomTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
@@ -56,7 +83,7 @@ export default function ChartComponent({ data, meta, color = "#3b82f6", height =
           </p>
           <div className="flex items-end gap-3">
             <p className="text-xl font-black text-white leading-none">
-              {formatPrice(currentPoint.value, currentPoint.currency || currency)}
+              {formatPrice(currentPoint.value, currentPoint.currency || currency, !isIndex)}
             </p>
             {change !== 0 && (
               <p className={`text-[10px] font-black leading-none mb-0.5 ${Number(change) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
@@ -77,9 +104,9 @@ export default function ChartComponent({ data, meta, color = "#3b82f6", height =
          <DataBadge meta={meta} />
       </div>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart 
-          data={processedData} 
-          onClick={(state) => onPointClick && state?.activePayload && onPointClick(state.activePayload[0].payload)}
+        <AreaChart
+          data={processedData}
+          onClick={handleChartClick}
           margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
         >
           <defs>
@@ -102,7 +129,7 @@ export default function ChartComponent({ data, meta, color = "#3b82f6", height =
             fontWeight={700}
             tickLine={false} 
             axisLine={false}
-            tickFormatter={(v) => formatPrice(v, currency)}
+            tickFormatter={yAxisFormatter}
             domain={[min - padding, max + padding]}
             orientation="right"
           />
@@ -113,3 +140,7 @@ export default function ChartComponent({ data, meta, color = "#3b82f6", height =
     </div>
   );
 }
+
+// Memoize the whole component — chart re-renders skip when props are
+// structurally equal (same data ref, meta, color, height).
+export default React.memo(ChartComponent);

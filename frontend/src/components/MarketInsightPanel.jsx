@@ -6,7 +6,7 @@ import InfoTooltip from './InfoTooltip';
 import { getIndexInsight, getChartData } from '../services/api';
 import { useMarket } from '../context/MarketContext';
 
-export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGame }) {
+function MarketInsightPanel({ isOpen, onClose, indexData, onTryGame }) {
   const { marketMode } = useMarket();
   const [timeframe, setTimeframe] = useState('1D');
   const [chartData, setChartData] = useState([]);
@@ -55,7 +55,7 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
     setLoadingChart(true);
     try {
       const res = await getChartData(indexData.symbol, timeframe);
-      setChartData(res?.data?.chartData || []);
+      setChartData(res?.data?.data || []);
     } catch (err) {
       setChartData([]);
     } finally {
@@ -286,3 +286,5 @@ export default function MarketInsightPanel({ isOpen, onClose, indexData, onTryGa
     </AnimatePresence>
   );
 }
+
+export default React.memo(MarketInsightPanel);

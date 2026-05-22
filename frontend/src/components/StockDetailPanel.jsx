@@ -45,6 +45,8 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
   const [insightScore, setInsightScore] = useState(() => parseInt(localStorage.getItem('insightScore') || '0', 10));
   const [showScorePopup, setShowScorePopup] = useState(false);
 
+  const isIndex = stock?.symbol?.startsWith('^') || stock?.symbol === 'SPY' || stock?.symbol === 'QQQ' || stock?.symbol === 'DIA';
+
   useEffect(() => {
     if (isOpen && stock) {
       setLoadingChart(true);
@@ -70,7 +72,7 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
       title: "Syncing AI Mentor...",
       explanation: `Connecting to market logic for ${stock.symbol}...`,
       type: 'stock',
-      data: [{ label: 'Price', value: formatPrice(point.value, stock.currency) }]
+      data: [{ label: isIndex ? 'Points' : 'Price', value: formatPrice(point.value, stock.currency, !isIndex) }]
     });
 
     try {
@@ -96,7 +98,7 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
           type: 'stock',
           data: [
             { label: 'Time', value: point.formattedTime },
-            { label: 'Price', value: formatPrice(point.value, stock.currency), color: 'text-white' },
+            { label: isIndex ? 'Points' : 'Price', value: formatPrice(point.value, stock.currency, !isIndex), color: 'text-white' },
             { label: 'Momentum', value: `${change}%`, color: Number(change) >= 0 ? 'text-emerald-500' : 'text-rose-500' }
           ],
           actions: [{ label: 'Got it!', primary: true }]
@@ -192,8 +194,8 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                   <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-3xl rounded-full" />
                   <div className="flex justify-between items-end relative z-10">
                     <div>
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Current Price</p>
-                      <p className="text-5xl font-black text-white tracking-tighter">{formatPrice(stock.price, stock.currency || 'INR')}</p>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{isIndex ? 'Current Points' : 'Current Price'}</p>
+                      <p className="text-5xl font-black text-white tracking-tighter">{formatPrice(stock.price, stock.currency || 'INR', !isIndex)}</p>
                       <div className="flex items-center gap-2 mt-2">
                         <InfoTooltip concept="volatility">
                           <p className="text-[9px] font-bold text-blue-400/80 uppercase tracking-widest">Price movements reflect market sentiment</p>
@@ -248,6 +250,7 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                           color={(stock.change || "").startsWith('+') ? '#10b981' : '#f43f5e'} 
                           height={250} 
                           onPointClick={handleChartClick}
+                          isIndex={isIndex}
                         />
                       )}
                    </div>

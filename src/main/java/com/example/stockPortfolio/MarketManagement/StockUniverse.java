@@ -11,7 +11,14 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "stock_universe")
+@Table(name = "stock_universe",
+       indexes = {
+           // Composite index on (symbol, market) accelerates the per-symbol
+           // market filtering used during hydration & top-mover precomputation.
+           @Index(name = "idx_stock_universe_symbol_market", columnList = "symbol, market"),
+           @Index(name = "idx_stock_universe_market", columnList = "market"),
+           @Index(name = "idx_stock_universe_is_index", columnList = "isIndex")
+       })
 public class StockUniverse {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

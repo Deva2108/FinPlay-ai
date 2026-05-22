@@ -4,6 +4,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.validation.constraints.DecimalMin;
@@ -18,7 +19,12 @@ import java.math.BigDecimal;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(uniqueConstraints = {@UniqueConstraint(columnNames = {"userId", "portfolioId", "symbol"})})
+@Table(uniqueConstraints = {@UniqueConstraint(columnNames = {"userId", "portfolioId", "symbol"})},
+       indexes = {
+           // Accelerate per-user/per-portfolio lookups and distinct-symbol scans.
+           @Index(name = "idx_holding_user_portfolio", columnList = "userId, portfolioId"),
+           @Index(name = "idx_holding_symbol", columnList = "symbol")
+       })
 public class Holding{
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

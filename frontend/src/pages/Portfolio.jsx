@@ -19,6 +19,7 @@ import PortfolioFlowInsight from '../components/PortfolioFlowInsight';
 import PortfolioStockPanel from '../components/PortfolioStockPanel';
 import InfoTooltip from '../components/InfoTooltip';
 import MicroLearningCard from '../components/MicroLearningCard';
+import WidgetErrorBoundary from '../components/WidgetErrorBoundary';
 import { getLearningInsight } from '../utils/learningEngine';
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#22c55e', '#f59e0b', '#ec4899', '#14b8a6'];
@@ -131,26 +132,61 @@ export default function Portfolio() {
     return () => clearInterval(interval);
   }, []);
 
-  const { holdings, totalInvested, totalCurrentValue, totalGain, totalYield, allocation, portfolioMood, riskLevel, topStock } = useMemo(() => {
-    const totalInvested = portfolio.reduce((acc, curr) => acc + curr.invested, 0);
-    const calculatedHoldings = (portfolio || []).map(stock => ({ ...stock, status: stock.gainVal >= 0 ? 'profit' : 'loss' }));
-    const totalCurrentValue = (calculatedHoldings || []).reduce((acc, curr) => acc + curr.currentValue, 0);
-    const totalGain = totalCurrentValue - totalInvested;
-    const totalYield = totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
-    const allocation = (calculatedHoldings || []).map(h => ({ name: h.symbol, value: h.currentValue }));
-    const portfolioMood = totalYield > 2 ? 'Bullish' : totalYield < -2 ? 'Risky' : 'Mixed';
-    const riskLevel = calculatedHoldings.length === 0 ? 'None' : calculatedHoldings.length <= 3 ? 'High' : 'Balanced';
-    const topStock = (allocation || []).sort((a,b) => b.value - a.value)[0]?.name || '';
+  // Split memos: stabilize derived arrays so unrelated state changes don't recompute everything.
+  const holdings = useMemo(
+    () => (Array.isArray(portfolio) ? portfolio : []).map(stock => ({
+      ...stock,
+      status: (Number(stock?.gainVal) || 0) >= 0 ? 'profit' : 'loss'
+    })),
+    [portfolio]
+  );
 
-    return { holdings: calculatedHoldings, totalInvested, totalCurrentValue, totalGain, totalYield, allocation, portfolioMood, riskLevel, topStock };
-  }, [portfolio]);
+  const totalInvested = useMemo(
+    () => holdings.reduce((acc, curr) => acc + (Number(curr?.invested) || 0), 0),
+    [holdings]
+  );
+
+  const totalCurrentValue = useMemo(
+    () => holdings.reduce((acc, curr) => acc + (Number(curr?.currentValue) || 0), 0),
+    [holdings]
+  );
+
+  const totalGain = useMemo(() => totalCurrentValue - totalInvested, [totalCurrentValue, totalInvested]);
+  const totalYield = useMemo(() => (totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0), [totalGain, totalInvested]);
+
+  const allocation = useMemo(
+    () => holdings.map(h => ({ name: h?.symbol, value: Number(h?.currentValue) || 0 })),
+    [holdings]
+  );
+
+  const portfolioMood = useMemo(
+    () => (totalYield > 2 ? 'Bullish' : totalYield < -2 ? 'Risky' : 'Mixed'),
+    [totalYield]
+  );
+
+  const riskLevel = useMemo(
+    () => (holdings.length === 0 ? 'None' : holdings.length <= 3 ? 'High' : 'Balanced'),
+    [holdings.length]
+  );
+
+  const topStock = useMemo(() => {
+    if (allocation.length === 0) return '';
+    let best = allocation[0];
+    for (let i = 1; i < allocation.length; i++) {
+      if ((allocation[i]?.value || 0) > (best?.value || 0)) best = allocation[i];
+    }
+    return best?.name || '';
+  }, [allocation]);
 
   const adaptiveInsight = useMemo(() => getLearningInsight({ decisions: behaviorDecisions, missedOpportunities: behaviorMissed, holdings, totalCurrentValue }), [behaviorDecisions, behaviorMissed, holdings, totalCurrentValue]);
 
-  const objectives = [
-    { title: "Diversify Sectors", progress: (holdings?.length || 0) >= 3 ? 100 : ((holdings?.length || 0) / 3) * 100, icon: <Shield size={14}/> },
-    { title: "Smart Decision Streak", progress: (decisions || []).filter(d => d?.action === 'BUY').length >= 5 ? 100 : ((decisions || []).filter(d => d?.action === 'BUY').length / 5) * 100, icon: <Zap size={14}/> }
-  ];
+  const objectives = useMemo(() => {
+    const buyCount = (decisions || []).filter(d => d?.action === 'BUY').length;
+    return [
+      { title: "Diversify Sectors", progress: holdings.length >= 3 ? 100 : (holdings.length / 3) * 100, icon: <Shield size={14}/> },
+      { title: "Smart Decision Streak", progress: buyCount >= 5 ? 100 : (buyCount / 5) * 100, icon: <Zap size={14}/> }
+    ];
+  }, [holdings.length, decisions]);
 
   useEffect(() => {
     if (totalCurrentValue > lastTotalValue && lastTotalValue !== 0) setValueDirection('up');
@@ -387,7 +423,9 @@ export default function Portfolio() {
             </motion.div>
 
             {/* Adaptive Learning Insight */}
-            <MicroLearningCard insight={adaptiveInsight} />
+            <WidgetErrorBoundary name="Learning Insight">
+              <MicroLearningCard insight={adaptiveInsight} />
+            </WidgetErrorBoundary>
 
             {/* Capital Status */}
             <div className="p-6 rounded-[2rem] bg-gradient-to-br from-[#0f172a] to-[#1e293b] border border-white/5 shadow-[0_0_20px_rgba(59,130,246,0.08)] transition-all duration-300 relative overflow-hidden flex flex-col gap-4">
@@ -482,13 +520,15 @@ export default function Portfolio() {
             {/* Allocation */}
             <div className="p-6 rounded-[2rem] bg-gradient-to-br from-[#0f172a] to-[#1e293b] border border-white/5 shadow-[0_0_20px_rgba(59,130,246,0.08)] hover:scale-[1.01] transition-all duration-300 flex flex-col items-center cursor-pointer flex-1 group" onClick={handleRiskClick}>
                <div className="h-32 w-full mb-4">
-                  <ResponsiveContainer>
-                    <PieChart>
-                      <Pie data={allocation} innerRadius={35} outerRadius={50} paddingAngle={8} dataKey="value">
-                        {(allocation || []).map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />)}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <WidgetErrorBoundary name="Allocation Chart">
+                    <ResponsiveContainer>
+                      <PieChart>
+                        <Pie data={allocation} innerRadius={35} outerRadius={50} paddingAngle={8} dataKey="value">
+                          {(allocation || []).map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />)}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </WidgetErrorBoundary>
                </div>
                <div className="w-full space-y-3">
                   <div className="flex justify-between items-center py-2 border-b border-white/5">

@@ -14,7 +14,7 @@ import { useStockPanel } from '../context/StockPanelContext';
 import { useMarket } from '../context/MarketContext';
 import { searchStocks, getIndices, getTrending, getMarketVibeResponse, getTutorialInsightResponse, getFamousInsights, getMarketPulse, api, API_ENDPOINTS, getWatchlist } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
-import { formatPrice } from '../utils/formatters';
+import { formatPrice, safePct } from '../utils/formatters';
 import { useTrading } from '../context/TradingContext';
 import { useGuide } from '../hooks/useGuide';
 import { useInsight } from '../hooks/useInsight';

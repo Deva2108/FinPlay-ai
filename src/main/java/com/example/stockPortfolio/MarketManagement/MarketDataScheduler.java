@@ -49,20 +49,26 @@ public class MarketDataScheduler {
     private static final int TWELVEDATA_CYCLE_LIMIT = 8;
     private static final int AFTER_HOURS_BATCH_SIZE = 4;
 
-    public MarketDataScheduler(FinnhubService finnhubService, NewsApiService newsApiService, 
+    // Heavy services tagged @Lazy so the scheduler bean (and downstream
+    // SecurityFilterChain → Tomcat port bind) can finish initializing without
+    // waiting on Finnhub/News/AI/Google clients to warm up. The first
+    // @Scheduled tick (initialDelay >= 30s) triggers their real instantiation,
+    // by which time the actuator health endpoint is already serving traffic.
+    public MarketDataScheduler(@Lazy FinnhubService finnhubService,
+                               @Lazy NewsApiService newsApiService,
                                MarketGateway marketGateway,
-                               SymbolNormalizer symbolNormalizer, 
-                               com.example.stockPortfolio.HoldingsManagement.HoldingRepo holdingRepo, 
-                               com.example.stockPortfolio.AlertManagement.AlertRepo alertRepo, 
-                               com.example.stockPortfolio.AiManagement.service.AiService aiService, 
-                               com.example.stockPortfolio.PortfolioManagement.PortfolioRepo portfolioRepo, 
+                               SymbolNormalizer symbolNormalizer,
+                               com.example.stockPortfolio.HoldingsManagement.HoldingRepo holdingRepo,
+                               com.example.stockPortfolio.AlertManagement.AlertRepo alertRepo,
+                               @Lazy com.example.stockPortfolio.AiManagement.service.AiService aiService,
+                               com.example.stockPortfolio.PortfolioManagement.PortfolioRepo portfolioRepo,
                                com.example.stockPortfolio.UserManagement.UserRepo userRepo,
-                               ExternalMarketDataGateway externalMarketDataGateway,
+                               @Lazy ExternalMarketDataGateway externalMarketDataGateway,
                                MarketStatusService marketStatusService,
-                               GoogleSheetsService googleSheetsService,
+                               @Lazy GoogleSheetsService googleSheetsService,
                                StockUniverseRepo stockUniverseRepo,
                                org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate,
-                               MarketAnalysisService marketAnalysisService) {
+                               @Lazy MarketAnalysisService marketAnalysisService) {
         this.finnhubService = finnhubService;
         this.newsApiService = newsApiService;
         this.marketGateway = marketGateway;
@@ -128,10 +134,18 @@ public class MarketDataScheduler {
             if (!quotes.isEmpty()) {
                 quotes.forEach(marketGateway::updateMirror);
             } else {
-                for (String s : targets) {
-                    Map<String, Object> q = externalMarketDataGateway.fetchQuoteWithFallback(s);
-                    if (q != null) marketGateway.updateMirror(s, q);
-                    Thread.sleep(1000); 
+                // Non-blocking pacing via CompletableFuture.delayedExecutor — frees the
+                // scheduler thread immediately. Yahoo polls still execute at ~1 req/sec.
+                for (int i = 0; i < targets.size(); i++) {
+                    final String s = targets.get(i);
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            Map<String, Object> q = externalMarketDataGateway.fetchQuoteWithFallback(s);
+                            if (q != null) marketGateway.updateMirror(s, q);
+                        } catch (Exception ex) {
+                            log.warn("Fallback fetch failed for {}: {}", s, ex.getMessage());
+                        }
+                    }, CompletableFuture.delayedExecutor(i * 1000L, TimeUnit.MILLISECONDS, aiPrecomputationExecutor));
                 }
             }
         } catch (Exception e) {
@@ -298,13 +312,20 @@ public class MarketDataScheduler {
                 quotes.forEach(marketGateway::updateMirror);
                 log.info("Hydration cycle: Successfully updated {} symbols.", quotes.size());
             } else {
-                // LAST RESORT: Yahoo slow-poll (Free, unthrottled but risk of ban)
+                // LAST RESORT: Yahoo slow-poll (Free, unthrottled but risk of ban).
+                // Non-blocking staggered scheduling preserves ~2 req/sec pacing
+                // without holding the scheduler thread.
                 log.warn("Batch failed. Falling back to individual Yahoo poll for {} symbols.", symbolsToFetch.size());
-                for (String s : symbolsToFetch) {
-                    Map<String, Object> q = externalMarketDataGateway.fetchQuoteWithFallback(s);
-                    if (q != null) marketGateway.updateMirror(s, q);
-                    // Minimal delay to be kind to Yahoo
-                    Thread.sleep(500);
+                for (int i = 0; i < symbolsToFetch.size(); i++) {
+                    final String s = symbolsToFetch.get(i);
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            Map<String, Object> q = externalMarketDataGateway.fetchQuoteWithFallback(s);
+                            if (q != null) marketGateway.updateMirror(s, q);
+                        } catch (Exception ex) {
+                            log.warn("Yahoo fallback fetch failed for {}: {}", s, ex.getMessage());
+                        }
+                    }, CompletableFuture.delayedExecutor(i * 500L, TimeUnit.MILLISECONDS, aiPrecomputationExecutor));
                 }
             }
 

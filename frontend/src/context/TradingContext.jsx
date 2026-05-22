@@ -9,6 +9,8 @@ import {
 } from '../services/api';
 
 const TradingContext = createContext();
+const TradeStateContext = createContext();
+const TradeActionContext = createContext();
 
 export function TradingProvider({ children }) {
   const [balance, setBalance] = useState(100000);
@@ -240,11 +242,32 @@ export function TradingProvider({ children }) {
     ...state, ...actions
   }), [state, actions]);
 
-  return <TradingContext.Provider value={contextValue}>{children}</TradingContext.Provider>;
+  // Nested providers ensure that components subscribing ONLY to actions never
+  // rerender when state changes. The combined `TradingContext` remains for
+  // backwards compatibility with existing consumers.
+  return (
+    <TradeActionContext.Provider value={actions}>
+      <TradeStateContext.Provider value={state}>
+        <TradingContext.Provider value={contextValue}>{children}</TradingContext.Provider>
+      </TradeStateContext.Provider>
+    </TradeActionContext.Provider>
+  );
 }
 
 export function useTrading() {
   const context = useContext(TradingContext);
   if (!context) throw new Error('useTrading must be used within a TradingProvider');
   return context;
+}
+
+export function useTradeState() {
+  const ctx = useContext(TradeStateContext);
+  if (!ctx) throw new Error('useTradeState must be used within a TradingProvider');
+  return ctx;
+}
+
+export function useTradeActions() {
+  const ctx = useContext(TradeActionContext);
+  if (!ctx) throw new Error('useTradeActions must be used within a TradingProvider');
+  return ctx;
 }

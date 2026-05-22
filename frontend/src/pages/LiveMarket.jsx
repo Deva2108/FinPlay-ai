@@ -57,7 +57,7 @@ export default function LiveMarket() {
     setLoadingChart(true);
     try {
       const res = await getChartData(symbol, timeframe);
-      setChartData(res?.data?.chartData || []);
+      setChartData(res?.data?.data || []);
     } catch (err) {
       setChartData([]);
     } finally {
@@ -74,6 +74,7 @@ export default function LiveMarket() {
   }, [symbol, timeframe]);
 
   const isUp = details?.change >= 0;
+  const isIndex = symbol?.startsWith('^') || symbol === 'SPY' || symbol === 'QQQ' || symbol === 'DIA';
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto p-6 sm:p-10 space-y-10 pb-32">
@@ -86,7 +87,7 @@ export default function LiveMarket() {
               Global Index
             </button>
             <h1 className="text-4xl font-black text-white tracking-tighter uppercase flex items-center gap-2">
-              {symbol.startsWith('^') ? 'NIFTY 50' : symbol === 'SPY' ? 'S&P 500' : symbol}
+              {symbol.startsWith('^') ? (symbol === '^NSEI' ? 'NIFTY 50' : symbol === '^BSESN' ? 'SENSEX' : symbol) : symbol === 'SPY' ? 'S&P 500' : symbol}
               <InfoTooltip concept="index" />
             </h1>
           </div>
@@ -94,7 +95,7 @@ export default function LiveMarket() {
             <p className="text-sm font-black text-slate-500 uppercase tracking-widest animate-pulse">Updating market data...</p>
           ) : (
             <p className="text-2xl font-black text-white flex items-center gap-3">
-              {currencySymbol}{details?.price ?? '--'}
+              {isIndex ? (details?.price ?? '--') : `${currencySymbol}${details?.price ?? '--'}`}
               <span className={`text-sm font-black ${isUp ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {isUp ? '+' : ''}{details?.change ?? '--'}%
               </span>
@@ -136,6 +137,7 @@ export default function LiveMarket() {
                 data={chartData} 
                 color={isUp ? '#10b981' : '#f43f5e'} 
                 height={350} 
+                isIndex={isIndex}
               />
             </div>
           </div>

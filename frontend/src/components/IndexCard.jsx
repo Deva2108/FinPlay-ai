@@ -2,7 +2,7 @@ import React from 'react';
 import { HelpCircle, TrendingUp, TrendingDown } from 'lucide-react';
 import InfoTooltip from './InfoTooltip';
 
-export default function IndexCard({ symbol, value, change, percent, onClick }) {
+function IndexCard({ symbol, value, change, percent, onClick }) {
   const isPositive = (change || "").startsWith('+');
 
   return (
@@ -39,3 +39,5 @@ export default function IndexCard({ symbol, value, change, percent, onClick }) {
     </div>
   );
 }
+
+export default React.memo(IndexCard);
