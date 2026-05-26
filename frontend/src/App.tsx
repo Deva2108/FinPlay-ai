@@ -4,8 +4,8 @@ import { AlertTriangle } from 'lucide-react';
 
 const LoadingScreen = () => (
   <div className="h-screen w-full bg-[#020617] flex flex-col items-center justify-center gap-4">
-    <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
-    <p className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] animate-pulse">Syncing Arena...</p>
+    <div className="w-10 h-10 border-2 border-white/10 border-t-blue-500 rounded-full animate-spin" />
+    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em]">Loading</p>
   </div>
 );
 
@@ -63,14 +63,17 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
                 <AlertTriangle size={40} className="text-rose-500 animate-pulse" />
               </div>
               <div className="space-y-2">
-                <h2 className="text-2xl font-black text-white uppercase tracking-tight">Sync Interrupted</h2>
-                <p className="text-slate-400 text-sm leading-relaxed">The system encountered a logic gap. Don't worry, your assets are safe.</p>
+                <h2 className="text-2xl font-black text-white uppercase tracking-tight">Something broke</h2>
+                <p className="text-slate-400 text-sm leading-relaxed">The page hit an unexpected error. Your holdings and balance are unaffected — they're stored server-side.</p>
+                {this.state.error?.message && (
+                  <pre className="mt-3 p-3 bg-black/40 rounded-lg text-[10px] text-rose-300 font-mono overflow-x-auto text-left max-h-32">{this.state.error.message}</pre>
+                )}
               </div>
               <button
                 onClick={() => window.location.href = '/'}
                 className="w-full py-4 bg-white text-slate-950 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all shadow-xl shadow-white/5"
               >
-                Reboot Connection
+                Reload
               </button>
             </div>
           </div>
@@ -99,8 +102,8 @@ class RouteErrorBoundary extends Component<{ children: ReactNode; name?: string 
             <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
               <AlertTriangle size={28} className="text-rose-500" />
             </div>
-            <h3 className="text-lg font-black text-white uppercase tracking-tight">{this.props.name || 'Page'} Unavailable</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">Sync interrupted on this section. Other features remain online.</p>
+            <h3 className="text-lg font-black text-white uppercase tracking-tight">{this.props.name || 'Page'} failed to load</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">This section crashed. The rest of the app is still working — try again or navigate elsewhere.</p>
             <button
               onClick={() => this.setState({ hasError: false })}
               className="px-5 py-2 bg-white text-slate-950 rounded-xl text-[10px] font-black uppercase tracking-widest"

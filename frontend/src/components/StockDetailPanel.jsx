@@ -42,8 +42,6 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
   const [timeframe, setTimeframe] = useState('1M');
   
   const [insightPanelContent, setInsightPanelContent] = useState(null);
-  const [insightScore, setInsightScore] = useState(() => parseInt(localStorage.getItem('insightScore') || '0', 10));
-  const [showScorePopup, setShowScorePopup] = useState(false);
 
   const isIndex = stock?.symbol?.startsWith('^') || stock?.symbol === 'SPY' || stock?.symbol === 'QQQ' || stock?.symbol === 'DIA';
 
@@ -68,18 +66,28 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
   };
 
   const handleChartClick = async (point) => {
+    const prevPoint = chartData[point.index - 1];
+    const trend = prevPoint ? (point.value >= prevPoint.value ? 'UP' : 'DOWN') : 'SIDEWAYS';
+    const change = prevPoint ? ((point.value - prevPoint.value) / prevPoint.value * 100).toFixed(2) : 0;
+
+    // Open immediately with deterministic math so there's no "syncing" theater.
+    // The AI call (if available) enriches this in-place when it returns.
+    const baseData = [
+      { label: 'Time', value: point.formattedTime },
+      { label: isIndex ? 'Points' : 'Price', value: formatPrice(point.value, stock.currency, !isIndex), color: 'text-white' },
+      { label: 'Move', value: `${Number(change) >= 0 ? '+' : ''}${change}%`, color: Number(change) >= 0 ? 'text-emerald-500' : 'text-rose-500' }
+    ];
+
     setInsightPanelContent({
-      title: "Syncing AI Mentor...",
-      explanation: `Connecting to market logic for ${stock.symbol}...`,
+      title: `${stock.symbol} · point detail`,
+      explanation: prevPoint
+        ? `${Number(change) >= 0 ? 'Up' : 'Down'} ${Math.abs(Number(change))}% from the prior point on the ${timeframe} chart.`
+        : `First point on the ${timeframe} chart — no prior reference.`,
       type: 'stock',
-      data: [{ label: isIndex ? 'Points' : 'Price', value: formatPrice(point.value, stock.currency, !isIndex) }]
+      data: baseData
     });
 
     try {
-      const prevPoint = chartData[point.index - 1];
-      const trend = prevPoint ? (point.value >= prevPoint.value ? 'UP' : 'DOWN') : 'SIDEWAYS';
-      const change = prevPoint ? ((point.value - prevPoint.value) / prevPoint.value * 100).toFixed(2) : 0;
-
       const res = await explainStock({
         symbol: stock.symbol,
         trend,
@@ -87,36 +95,19 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
         type: 'graph_point',
         metrics: { price: point.value }
       });
-
       const aiRes = res?.data;
-
-      if (aiRes) {
+      if (aiRes && (aiRes.richInsight || aiRes.observation || aiRes.explanation)) {
         setInsightPanelContent({
-          title: "Technical Insight",
-          explanation: aiRes.explanation,
+          title: `${stock.symbol} · point detail`,
+          explanation: aiRes.explanation || `${Number(change) >= 0 ? 'Up' : 'Down'} ${Math.abs(Number(change))}% from the prior point.`,
           insight: aiRes.richInsight || aiRes.observation,
           type: 'stock',
-          data: [
-            { label: 'Time', value: point.formattedTime },
-            { label: isIndex ? 'Points' : 'Price', value: formatPrice(point.value, stock.currency, !isIndex), color: 'text-white' },
-            { label: 'Momentum', value: `${change}%`, color: Number(change) >= 0 ? 'text-emerald-500' : 'text-rose-500' }
-          ],
-          actions: [{ label: 'Got it!', primary: true }]
+          data: baseData,
+          actions: [{ label: 'Close', primary: true }]
         });
-
-        const pointsEarned = Number(change) < -1 ? 10 : 5;
-        const newScore = insightScore + pointsEarned;
-        setInsightScore(newScore);
-        localStorage.setItem('insightScore', newScore.toString());
-        setShowScorePopup(pointsEarned);
-        setTimeout(() => setShowScorePopup(false), 2000);
       }
     } catch (err) {
-      setInsightPanelContent(prev => ({
-        ...prev,
-        title: "Analysis Unavailable",
-        explanation: "AI Mentor is temporarily offline. Try again shortly."
-      }));
+      // Math fallback is already on screen — no need to surface the failure as theater.
     }
   };
 
@@ -135,17 +126,6 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
             onClose={() => setShowBuyModal(false)} 
             onConfirm={handleConfirmBuy}
           />
-
-          {/* Score Popup */}
-          <AnimatePresence>
-            {showScorePopup && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: -40 }} exit={{ opacity: 0 }} className="fixed bottom-24 right-1/2 translate-x-1/2 z-[200]">
-                <div className="bg-blue-600 text-white px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-2xl flex items-center gap-2">
-                  <Zap size={14} className="fill-white" /> +{showScorePopup} Score
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           <div key="panel-container" className="fixed inset-0 z-[100] pointer-events-none">
             {/* Backdrop */}
@@ -177,16 +157,7 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                       <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-2">{stock.name}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex flex-col items-end">
-                      <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-1">Total Insights</span>
-                      <div className="flex items-center gap-2 bg-blue-500/10 px-3 py-1 rounded-lg border border-blue-500/20">
-                        <Target size={12} className="text-blue-500" />
-                        <span className="text-xs font-black text-white">{insightScore}</span>
-                      </div>
-                    </div>
-                    <button onClick={onClose} className="p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors"><X size={24} className="text-slate-400" /></button>
-                  </div>
+                  <button onClick={onClose} className="p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors"><X size={24} className="text-slate-400" /></button>
                 </motion.div>
 
                 {/* 2. Price & Quick Info */}
@@ -211,11 +182,12 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                     </div>
                   </div>
 
-                  <div className="mt-8 pt-6 border-t border-white/5">
-                    <p className="text-slate-300 font-medium leading-relaxed italic text-sm">
-                      "This stock is moving because {stock.explanation?.toLowerCase() || "of current market trends and investor sentiment."}"
-                    </p>
-                  </div>
+                  {stock.explanation && (
+                    <div className="mt-8 pt-6 border-t border-white/5">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Backend note</p>
+                      <p className="text-slate-300 font-medium leading-relaxed text-sm">{stock.explanation}</p>
+                    </div>
+                  )}
                 </motion.div>
 
                 {/* 3. Interactive Chart */}
@@ -241,45 +213,66 @@ export default function StockDetailPanel({ stock, isOpen, onClose }) {
                    <div className="bg-slate-900/60 rounded-3xl border border-white/5 p-6 h-[300px]">
                       {loadingChart ? (
                         <div className="h-full flex flex-col items-center justify-center gap-3">
-                           <Zap size={24} className="text-blue-500 animate-spin" />
-                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest animate-pulse">Syncing {timeframe} Chart...</span>
+                           <div className="w-8 h-8 border-2 border-white/10 border-t-blue-500 rounded-full animate-spin" />
+                           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Loading {timeframe} history</span>
                         </div>
                       ) : (
-                        <ChartComponent 
-                          data={chartData} 
-                          color={(stock.change || "").startsWith('+') ? '#10b981' : '#f43f5e'} 
-                          height={250} 
+                        <ChartComponent
+                          data={chartData}
+                          color={(stock.change || "").startsWith('+') ? '#10b981' : '#f43f5e'}
+                          height={250}
                           onPointClick={handleChartClick}
                           isIndex={isIndex}
                         />
                       )}
                    </div>
-                   <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest text-center animate-pulse">Click point for AI insight</p>
+                   <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest text-center">Click any point for detail</p>
                 </motion.div>
 
-                {/* 4. Basic Metrics */}
-                <motion.div custom={3} variants={contentVariants} initial="hidden" animate="visible" className="space-y-6">
-                  <SectionHeader icon={PieChart} title="Financial Health" />
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <MetricCard label="Market Cap" value={stock.currency === 'USD' ? '2.8T' : '18.5L Cr'} explanation="Total value of the company." />
-                    <MetricCard label="P/E Ratio" value="28.4" explanation="Investor expectations score." />
-                    <MetricCard label="Revenue" value={stock.currency === 'USD' ? '383B' : '9.2L Cr'} explanation="Total annual sales." />
-                    <MetricCard label="Dividend" value="0.52%" explanation="Cash back for shareholders." />
-                  </div>
-                </motion.div>
-
-                {/* 5. Company Info */}
-                <motion.div custom={4} variants={contentVariants} initial="hidden" animate="visible" className="space-y-6">
-                  <SectionHeader icon={Briefcase} title="About the Company" />
-                  <div className="bg-white/5 border border-white/5 rounded-3xl p-6 space-y-6">
-                    <p className="text-slate-300 leading-relaxed font-medium text-sm">
-                      {stock.symbol === 'AAPL' ? "Apple designs, manufactures, and markets smartphones, personal computers, tablets, wearables, and accessories worldwide." : 
-                      stock.symbol === 'TSLA' ? "Tesla designs, develops, manufactures, and sells electric vehicles and energy generation systems." :
-                      stock.symbol === 'RELIANCE' ? "Reliance Industries is an Indian multinational conglomerate company, headquartered in Mumbai. It has businesses in energy, petrochemicals, retail, and telecommunications." :
-                      "A leader in its industry, focusing on innovation and global scale to provide value to its customers and shareholders."}
-                    </p>
-                  </div>
-                </motion.div>
+                {/* 4. Fundamentals — only what's actually populated on the stock object */}
+                {(stock.marketCap || stock.peRatio || stock.revenue || stock.dividendYield || stock.high52 || stock.low52) && (
+                  <motion.div custom={3} variants={contentVariants} initial="hidden" animate="visible" className="space-y-6">
+                    <SectionHeader icon={PieChart} title="Fundamentals" />
+                    <div className="grid grid-cols-2 gap-px bg-white/5 border border-white/5 rounded-2xl overflow-hidden">
+                      {stock.marketCap && (
+                        <div className="bg-slate-900/60 px-4 py-3 flex flex-col gap-0.5">
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Market Cap</span>
+                          <span className="text-sm font-black text-white">{stock.marketCap}</span>
+                        </div>
+                      )}
+                      {stock.peRatio && (
+                        <div className="bg-slate-900/60 px-4 py-3 flex flex-col gap-0.5">
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">P/E</span>
+                          <span className="text-sm font-black text-white tabular-nums">{stock.peRatio}</span>
+                        </div>
+                      )}
+                      {stock.high52 && (
+                        <div className="bg-slate-900/60 px-4 py-3 flex flex-col gap-0.5">
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">52W High</span>
+                          <span className="text-sm font-black text-emerald-400 tabular-nums">{formatPrice(stock.high52, stock.currency, !isIndex)}</span>
+                        </div>
+                      )}
+                      {stock.low52 && (
+                        <div className="bg-slate-900/60 px-4 py-3 flex flex-col gap-0.5">
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">52W Low</span>
+                          <span className="text-sm font-black text-rose-400 tabular-nums">{formatPrice(stock.low52, stock.currency, !isIndex)}</span>
+                        </div>
+                      )}
+                      {stock.revenue && (
+                        <div className="bg-slate-900/60 px-4 py-3 flex flex-col gap-0.5">
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Revenue</span>
+                          <span className="text-sm font-black text-white">{stock.revenue}</span>
+                        </div>
+                      )}
+                      {stock.dividendYield && (
+                        <div className="bg-slate-900/60 px-4 py-3 flex flex-col gap-0.5">
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Dividend</span>
+                          <span className="text-sm font-black text-white">{stock.dividendYield}</span>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
 
                 {/* Footer Actions */}
                 <motion.div custom={5} variants={contentVariants} initial="hidden" animate="visible" className="fixed bottom-0 left-0 right-0 p-8 bg-[#020617]/90 backdrop-blur-xl border-t border-white/5 flex gap-4 z-20 pointer-events-auto">

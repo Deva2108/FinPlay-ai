@@ -12,7 +12,7 @@ import FinPlayArena from '../components/FinPlayArena';
 import LastMoveCard from '../components/GameMode/LastMoveCard';
 import { useStockPanel } from '../context/StockPanelContext';
 import { useMarket } from '../context/MarketContext';
-import { searchStocks, getIndices, getTrending, getMarketVibeResponse, getTutorialInsightResponse, getFamousInsights, getMarketPulse, api, API_ENDPOINTS, getWatchlist } from '../services/api';
+import { searchStocks, getIndices, getTrending, getMarketVibeResponse, getTutorialInsightResponse, getFamousInsights, getMarketPulse, api, API_ENDPOINTS, getWatchlist, swrRead, swrWrite } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import { formatPrice, safePct } from '../utils/formatters';
 import { useTrading } from '../context/TradingContext';
@@ -25,6 +25,8 @@ import IndexCard from '../components/IndexCard';
 import MarketInsightPanel from '../components/MarketInsightPanel';
 import NextEdgeCard from '../components/NextEdgeCard';
 import WidgetErrorBoundary from '../components/WidgetErrorBoundary';
+import { FreshnessLabel, LiveFeedRotator } from '../components/Dashboard/LiveBits';
+import LiveTicker from '../components/Dashboard/LiveTicker';
 
  
 export default function Dashboard() {
@@ -39,7 +41,7 @@ export default function Dashboard() {
 
   const vibeParams = useMemo(() => ({ marketType: marketCode === 'IN' ? 'INDIA' : 'US' }), [marketCode]);
   const { data: vibeData, status: vibeStatus } = useInsight(API_ENDPOINTS.MARKET.VIBE, vibeParams);
-  const marketVibe = useMemo(() => vibeData?.simpleVibe || vibeData?.message || "Market analysis in progress...", [vibeData]);
+  const marketVibe = useMemo(() => vibeData?.simpleVibe || vibeData?.message || "Reading the tape — fresh sentiment in a moment.", [vibeData]);
   const loadingVibe = vibeStatus === 'SYNCING';
 
   const [pulseData, setMarketPulseData] = useState(null);
@@ -51,7 +53,6 @@ export default function Dashboard() {
   const [insightContent, setInsightContent] = useState(null);
   const [marketInsightData, setMarketInsightData] = useState(null);
   const [gameContext, setGameContext] = useState(null);
-  const [stripIndex, setStripIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -91,54 +92,88 @@ export default function Dashboard() {
   };
 
   const fetchMarketData = async () => {
-    try {
-      // Critical path: indices first
-      const indicesRes = await getIndices(marketMode);
-      setIndices(indicesRes?.data || []);
-      setLoadingMarket(false);
+    // ── Instant paint: hydrate from SWR cache before any network call ──────
+    const idxKey = `idx_${marketMode}`;
+    const ci = swrRead(idxKey);
+    const ct = swrRead('trending');
+    const cf = swrRead('famous');
+    const cw = swrRead('watchlist');
+    if (ci) { setIndices(ci); setLoadingMarket(false); }
+    if (ct) setTrending(ct);
+    if (cf) setFamousInsights(cf);
+    if (cw) setWatchlist(cw);
 
-      // Critical path: pulse (guarded internally by activePortfolioId check)
-      await fetchPulse();
+    // ── Fire all 5 requests in parallel — no request blocks another ────────
+    setLoadingPulse(true);
+    const [indicesRes, trendingRes, famousRes, watchlistRes, pulseRes] = await Promise.allSettled([
+      getIndices(marketMode),
+      getTrending(),
+      getFamousInsights("ALL"),
+      getWatchlist(),
+      activePortfolioId ? getMarketPulse(activePortfolioId) : Promise.resolve(null)
+    ]);
 
-      // Secondary: safe to run in parallel after critical data is ready
-      const [trendingRes, famousRes, watchlistRes] = await Promise.all([
-        getTrending(),
-        getFamousInsights("ALL"),
-        getWatchlist()
-      ]);
-      setTrending(trendingRes?.data || []);
-      setFamousInsights(famousRes?.data || []);
-      setWatchlist(watchlistRes?.data || []);
-
-      const isSyncing = [indicesRes, trendingRes, famousRes, watchlistRes].some(res => res?.syncing);
-      setSyncingMarket(isSyncing);
-      if (isSyncing) setLoadingMarket(true);
-
-    } catch (err) {
-      console.error("Market data fetch failed", err);
+    // ── Hydrate independently — one failure cannot blank adjacent widgets ───
+    if (indicesRes.status === 'fulfilled') {
+      const d = indicesRes.value?.data;
+      if (Array.isArray(d)) { setIndices(d); swrWrite(idxKey, d); }
+      const syncing = indicesRes.value?.syncing;
+      setSyncingMarket(!!syncing);
+      setLoadingMarket(!!syncing);
+    } else {
       setLoadingMarket(false);
     }
-  };
 
-  const fetchPulse = async () => {
-    if (!activePortfolioId) return;
-    try {
-      setLoadingPulse(true);
-      const pulseRes = await getMarketPulse(activePortfolioId);
-      if (pulseRes?.data) setMarketPulseData(pulseRes.data);
-      setLastRefresh(new Date());
-    } catch (err) {
-      console.error("Pulse fetch failed", err);
-    } finally {
-      setLoadingPulse(false);
+    if (trendingRes.status === 'fulfilled') {
+      const d = trendingRes.value?.data;
+      if (Array.isArray(d)) { setTrending(d); swrWrite('trending', d); }
     }
+
+    if (famousRes.status === 'fulfilled') {
+      const d = famousRes.value?.data;
+      if (Array.isArray(d)) { setFamousInsights(d); swrWrite('famous', d); }
+    }
+
+    if (watchlistRes.status === 'fulfilled') {
+      const d = watchlistRes.value?.data;
+      if (Array.isArray(d)) { setWatchlist(d); swrWrite('watchlist', d); }
+    }
+
+    if (pulseRes.status === 'fulfilled' && pulseRes.value?.data) {
+      setMarketPulseData(pulseRes.value.data);
+    }
+    setLoadingPulse(false);
+    setLastRefresh(new Date());
   };
 
   useEffect(() => {
-    fetchMarketData(); // fetchPulse is called inside after indices are ready
-    const poll = setInterval(() => fetchMarketData(), 1800000);
-    return () => clearInterval(poll);
+    fetchMarketData();
+    const heavyPoll = setInterval(() => fetchMarketData(), 1800000); // 30 min: full refresh
+    return () => clearInterval(heavyPoll);
   }, [marketMode, activePortfolioId, portfolioLoading]);
+
+  // Lightweight live tick isolated in <LiveTicker /> leaf — see render below.
+  // Interval is 60s (aligned with backend scheduler cadence). Moving the interval
+  // out of Dashboard prevents unnecessary re-renders of unrelated Dashboard subtrees
+  // on each tick. Skips ticks when the tab is hidden.
+
+  // Flash detector: when trending up/down counts shift, briefly highlight the breadth widget.
+  const prevBreadthRef = useRef({ up: 0, down: 0 });
+  const [breadthFlash, setBreadthFlash] = useState(null);
+  useEffect(() => {
+    const up = (trending || []).filter(s => (s?.change || '').startsWith('+')).length;
+    const down = (trending || []).filter(s => (s?.change || '').startsWith('-')).length;
+    const prev = prevBreadthRef.current;
+    if (prev.up !== 0 || prev.down !== 0) {
+      if (up > prev.up) setBreadthFlash('up');
+      else if (down > prev.down) setBreadthFlash('down');
+    }
+    prevBreadthRef.current = { up, down };
+    if (breadthFlash) {
+      const t = setTimeout(() => setBreadthFlash(null), 800);
+      return () => clearTimeout(t);
+    }
+  }, [trending]);
 
   const recentlyViewed = useMemo(() => (allRecentlyViewed || []).filter(s => s?.market === marketCode), [allRecentlyViewed, marketCode]);
   const decisions = useMemo(() => (allDecisions || []).filter(d => d?.stock && (d?.stock?.currency === (marketCode === 'IN' ? 'INR' : 'INR'))), [allDecisions, marketCode]);
@@ -197,29 +232,6 @@ export default function Dashboard() {
     trending: Array.isArray(trending) && trending.length > 0 ? trending : []
   }), [indices, trending]);
 
-  useEffect(() => {
-    const timer = setInterval(() => setStripIndex((prev) => (prev + 1) % 5), 5000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const activeSmartData = marketMode === "INDIA" ? {
-    insights: [
-      { title: "India's Retail Revolution", sub: "150M+ new investors entering the capital markets this year." },
-      { title: "Green Energy Pivot", sub: "Reliance's $10B Infrastructure Plan gaining institutional trust." },
-      { title: "Zomato Road to Profit", sub: "Food delivery margins hitting all-time high of 18%." },
-      { title: "Banking Consolidation", sub: "HDFC Bank integration nearing full operational synergy." },
-      { title: "IT Cloud Surge", sub: "Cloud adoption across digital enterprises up 40% YoY." }
-    ]
-  } : {
-    insights: [
-      { title: "AI Supercycle Peak", sub: "NVIDIA's Data Center revenue exceeds all previous benchmarks." },
-      { title: "Fed Interest Path", sub: "Market projects 3-rate stabilization through Q4 2024." },
-      { title: "Apple Services Boom", sub: "High-margin App Store revenue offsetting hardware cycles." },
-      { title: "Tesla Global Expansion", sub: "Gigafactory output hits record 5M unit run rate." },
-      { title: "S&P 500 Concentration", sub: "Mega-Caps drive 70% of total index growth in 2024." }
-    ]
-  };
-
   const handleIndexClick = (idx) => setMarketInsightData(idx);
   const handleTryGameFromIndex = (indexData) => {
     setGameContext(indexData?.symbol);
@@ -228,43 +240,70 @@ export default function Dashboard() {
 
   return (
     <>
+    {/* LiveTicker: isolated leaf that owns the 60s poll for indices + trending.
+        Renders nothing — calls setIndices/setTrending/setLastRefresh via stable refs
+        so unrelated Dashboard subtrees don't re-render on each scheduler tick. */}
+    <LiveTicker
+      marketMode={marketMode}
+      onIndicesUpdate={setIndices}
+      onTrendingUpdate={setTrending}
+      onRefresh={() => setLastRefresh(new Date())}
+    />
     <InsightPanel isOpen={!!insightContent} onClose={() => setInsightContent(null)} content={insightContent} />
     <MarketInsightPanel isOpen={!!marketInsightData} onClose={() => setMarketInsightData(null)} indexData={marketInsightData} onTryGame={handleTryGameFromIndex} />
     <div className={`transition-colors duration-500 min-h-full w-full pb-20 ${marketTone}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-8 space-y-8">
         
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="relative group cursor-default">
-          <div className="absolute -top-3 right-0 z-20">
-            <div className="px-3 py-1 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full border border-white/20 shadow-xl flex items-center gap-2">
-               <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500"></span>
-               </span>
-               <span className="text-[8px] font-black text-white uppercase tracking-widest">FinPlay ML v2.0 Training...</span>
-            </div>
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-slate-900/50 border border-white/5 backdrop-blur-xl rounded-2xl px-5 py-4 flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
+          <div className="flex items-center gap-3 shrink-0">
+            <div className={`w-2 h-2 rounded-full ${loadingPulse ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{loadingPulse ? 'Syncing' : 'Live'}</span>
+            <FreshnessLabel since={lastRefresh} />
+            <span className="hidden lg:block w-px h-4 bg-white/10" />
           </div>
-          <div className="absolute inset-0 bg-blue-600/5 blur-3xl rounded-[3rem]" />
-          <div className="relative bg-slate-900/60 border border-white/5 backdrop-blur-xl p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center gap-8 shadow-2xl transition-transform hover:scale-[1.01] duration-500">
-            <div className="w-16 h-16 bg-blue-600/10 rounded-2xl flex items-center justify-center border border-blue-500/20 shrink-0"><BrainCircuit size={32} className="text-blue-400" /></div>
-            <div className="space-y-2 flex-1 text-center md:text-left">
-               <div className="flex items-center justify-center md:justify-start gap-2 text-blue-400 mb-1">
-                 <Sparkles size={12} className="animate-pulse" /><span className="text-[9px] font-black uppercase tracking-[0.4em]">Live Market Pulse</span>
-               </div>
-               {loadingVibe ? (
-                 <div className="space-y-2"><div className="h-4 w-3/4 bg-white/5 animate-pulse rounded-full" /><div className="h-4 w-1/2 bg-white/5 animate-pulse rounded-full" /></div>
-               ) : (
-                 <h2 className="text-lg md:text-xl font-bold text-blue-50/90 leading-relaxed italic">"{marketVibe}"</h2>
-               )}
-            </div>
-            <div className="flex flex-col items-center md:items-end shrink-0">
-               <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Sync Status</span>
-               <span className="text-lg font-black text-emerald-500 uppercase tracking-tighter flex items-center gap-2">
-                 {loadingPulse ? 'Syncing...' : 'Live'} <div className={`w-2 h-2 rounded-full ${loadingPulse ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 animate-ping'}`} />
-               </span>
-               <p className="text-[8px] font-bold text-slate-600 mt-1 uppercase">Last: {lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-            </div>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <BrainCircuit size={14} className="text-indigo-400 shrink-0" />
+            {loadingVibe ? (
+              <div className="h-3 w-2/3 bg-white/5 animate-pulse rounded-full" />
+            ) : (
+              <p className="text-sm font-semibold text-slate-200 leading-snug truncate">{marketVibe}</p>
+            )}
           </div>
+          {(() => {
+            const trend = Array.isArray(trending) ? trending : [];
+            const up = trend.filter(s => (s?.change || '').startsWith('+')).length;
+            const down = trend.filter(s => (s?.change || '').startsWith('-')).length;
+            const total = up + down;
+            const breadth = total > 0 ? Math.round((up / total) * 100) : null;
+            return (
+              <div className={`flex items-center gap-4 shrink-0 transition-colors duration-500 ${breadthFlash === 'up' ? 'bg-emerald-500/10 -mx-2 px-2 py-1 rounded-lg' : breadthFlash === 'down' ? 'bg-rose-500/10 -mx-2 px-2 py-1 rounded-lg' : ''}`}>
+                <div className="flex items-center gap-1.5"><TrendingUp size={12} className="text-emerald-500" /><span className="text-xs font-bold text-emerald-400 tabular-nums">{up}</span></div>
+                <div className="flex items-center gap-1.5"><TrendingDown size={12} className="text-rose-500" /><span className="text-xs font-bold text-rose-400 tabular-nums">{down}</span></div>
+                {breadth !== null && (
+                  <div className="hidden md:flex items-center gap-2">
+                    <div className="w-20 h-1 bg-rose-500/30 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${breadth}%` }} /></div>
+                    <span className="text-[10px] font-black text-slate-400 tabular-nums w-8">{breadth}%</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </motion.div>
+
+        {!pulseData && loadingPulse && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-pulse">
+            <div className="lg:col-span-8 bg-slate-900/40 border border-white/5 rounded-[2.5rem] p-8 space-y-4">
+              <div className="h-5 w-48 bg-white/5 rounded-full" />
+              <div className="grid grid-cols-2 gap-4">
+                {[0,1,2,3].map(i => <div key={i} className="h-28 bg-white/5 rounded-2xl" />)}
+              </div>
+            </div>
+            <div className="lg:col-span-4 bg-slate-900/40 border border-white/5 rounded-[2.5rem] p-8 space-y-4">
+              <div className="h-4 w-32 bg-white/5 rounded-full" />
+              {[0,1,2].map(i => <div key={i} className="h-8 bg-white/5 rounded-xl" />)}
+            </div>
+          </div>
+        )}
 
         {pulseData && (
            <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -314,7 +353,7 @@ export default function Dashboard() {
                 {showDropdown && (searchQuery.length > 1) && (isSearching || searchResults.length > 0) && (
                   <div className="absolute top-full left-0 right-0 mt-2 z-50">
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl max-h-[400px] overflow-y-auto">
-                      {isSearching ? <div className="p-8 text-center text-slate-500 text-[10px] font-black uppercase animate-pulse">Syncing...</div> : (
+                      {isSearching ? <div className="p-8 text-center text-slate-500 text-[10px] font-black uppercase animate-pulse">Scanning tickers...</div> : (
                         <div className="py-2">
                           {(searchResults || []).map((result, idx) => (
                             <div key={idx} onClick={() => handleResultClick(result.symbol)} className="px-5 py-3 flex items-center justify-between hover:bg-white/5 cursor-pointer group border-b border-white/[0.03] last:border-0">
@@ -425,7 +464,7 @@ export default function Dashboard() {
                    ) : ( <div className="flex-1 flex flex-col items-center justify-center py-6 text-center space-y-2"><p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">No assets tracked</p></div> )}
                 </div>
             </section>
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="wait" initial={false}>
               {lastDecision ? ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}><LastMoveCard decision={lastDecision} onNext={() => setLastDecision(null)} /></motion.div>
               ) : (
                 <div className="bg-gradient-to-br from-blue-600 to-blue-400 p-6 rounded-3xl shadow-xl shadow-blue-500/20 relative overflow-hidden group">
@@ -462,13 +501,7 @@ export default function Dashboard() {
                   </div>
                </section>
             )}
-            <div className="p-6 rounded-3xl shadow-xl relative overflow-hidden group min-h-[200px] flex flex-col justify-center border border-white/5 cursor-pointer" style={{ background: `linear-gradient(145deg, ${accentColor}20, #020617)` }} onClick={() => setInsightContent({ type: 'info', title: 'Market Feed', insight: activeSmartData?.insights?.[stripIndex]?.sub || "Syncing...", actions: [{ label: 'Dismiss' }] })}>
-              <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:scale-110 transition-all duration-700"><Newspaper size={120} style={{ color: accentColor }} /></div>
-              <div className="relative z-10 space-y-4">
-                <div className="flex items-center gap-2"><Newspaper size={16} style={{ color: accentColor }} /><h3 className="text-white font-black text-xs uppercase tracking-widest">Market Feed</h3></div>
-                <div className="space-y-2"><h4 className="text-sm font-black text-white leading-tight">{activeSmartData?.insights?.[stripIndex]?.title || "Market Feed"}</h4><p className="text-[11px] text-slate-400 font-medium leading-relaxed">{activeSmartData?.insights?.[stripIndex]?.sub || "Syncing..."}</p></div>
-              </div>
-            </div>
+            <LiveFeedRotator newsItems={pulseData?.news} />
           </div>
         </div>
       </div>

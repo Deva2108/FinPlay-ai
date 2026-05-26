@@ -27,6 +27,15 @@ public class CacheConfig {
 
     /**
      * L1: IN-MEMORY CACHE (CAFFEINE)
+     *
+     * Default spec: 30 s TTL, 500 entries max.
+     * Per-endpoint overrides are registered via registerCustomCache() so hot
+     * endpoints avoid the Redis network-hop without serving stale snapshots:
+     *
+     *   pulse    → 10 s  (user-specific, changes every scheduler tick)
+     *   trending → 15 s  (batch-updated, safe to serve slightly stale)
+     *   vibe     → 30 s  (AI-generated, stable within a market session)
+     *   indices  → 20 s  (managed manually in MarketGateway, kept here for clarity)
      */
     @Bean
     public CacheManager l1CacheManager() {
@@ -36,6 +45,20 @@ public class CacheConfig {
                 .maximumSize(500)
                 .expireAfterWrite(30, TimeUnit.SECONDS)
                 .recordStats());
+
+        cacheManager.registerCustomCache("pulse",
+                Caffeine.newBuilder().maximumSize(50)
+                        .expireAfterWrite(10, TimeUnit.SECONDS).recordStats().build());
+        cacheManager.registerCustomCache("trending",
+                Caffeine.newBuilder().maximumSize(20)
+                        .expireAfterWrite(15, TimeUnit.SECONDS).recordStats().build());
+        cacheManager.registerCustomCache("vibe",
+                Caffeine.newBuilder().maximumSize(10)
+                        .expireAfterWrite(30, TimeUnit.SECONDS).recordStats().build());
+        cacheManager.registerCustomCache("indices",
+                Caffeine.newBuilder().maximumSize(30)
+                        .expireAfterWrite(20, TimeUnit.SECONDS).recordStats().build());
+
         return cacheManager;
     }
 
@@ -58,14 +81,31 @@ public class CacheConfig {
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(jsonSerializer));
 
         // Tiered configs
+        //
+        // Two-tier strategy with explicit key prefixes so Redis eviction (LRU under
+        // memory pressure) can target AI noise before it touches core market data:
+        //
+        //   core::*   →  market data the UX cannot function without. Long TTL so
+        //                a single Render/Redis hiccup doesn't blank the UI.
+        //   ai::*     →  generated text. Shorter TTL, separate namespace. If memory
+        //                fills, these are evicted first by name, not by chance.
+        //
+        // Note: the InsightAsyncService writes raw `insight:async:*` / `insight:status:*`
+        // keys via RedisTemplate (not @Cacheable), so the topic whitelist in
+        // InsightController is what keeps that namespace bounded.
         Map<String, RedisCacheConfiguration> configurations = new HashMap<>();
-        
-        configurations.put("hotQuotes", standardConfig.entryTtl(Duration.ofMinutes(5)));
-        configurations.put("marketNews", standardConfig.entryTtl(Duration.ofHours(1)));
-        configurations.put("stockCharts", standardConfig.entryTtl(Duration.ofHours(1)));
-        configurations.put("aiExplanations", standardConfig.entryTtl(Duration.ofHours(2)));
-        configurations.put("userInsights", standardConfig.entryTtl(Duration.ofHours(2)));
-        configurations.put("insights", standardConfig.entryTtl(Duration.ofHours(2))); // Add the missing 'insights' cache
+
+        // ── core:: market data — longer TTL, higher survival priority ──
+        RedisCacheConfiguration coreConfig = standardConfig.prefixCacheNameWith("core::");
+        configurations.put("hotQuotes",   coreConfig.entryTtl(Duration.ofMinutes(5)));
+        configurations.put("marketNews",  coreConfig.entryTtl(Duration.ofHours(2)));   // was 1h
+        configurations.put("stockCharts", coreConfig.entryTtl(Duration.ofHours(4)));   // was 1h — chart history rarely changes
+
+        // ── ai:: generated text — capped TTL, easier to evict ──
+        RedisCacheConfiguration aiConfig = standardConfig.prefixCacheNameWith("ai::");
+        configurations.put("aiExplanations", aiConfig.entryTtl(Duration.ofMinutes(45))); // was 2h
+        configurations.put("userInsights",   aiConfig.entryTtl(Duration.ofHours(1)));    // was 2h
+        configurations.put("insights",       aiConfig.entryTtl(Duration.ofHours(1)));    // was 2h
 
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(standardConfig)

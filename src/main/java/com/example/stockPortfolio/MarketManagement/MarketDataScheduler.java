@@ -27,6 +27,7 @@ public class MarketDataScheduler {
     private final com.example.stockPortfolio.AiManagement.service.AiService aiService;
     private final com.example.stockPortfolio.PortfolioManagement.PortfolioRepo portfolioRepo;
     private final com.example.stockPortfolio.UserManagement.UserRepo userRepo;
+    private final com.example.stockPortfolio.PortfolioManagement.PortfolioHistoryService portfolioHistoryService;
     
     private final ExecutorService aiPrecomputationExecutor;
     
@@ -68,7 +69,8 @@ public class MarketDataScheduler {
                                @Lazy GoogleSheetsService googleSheetsService,
                                StockUniverseRepo stockUniverseRepo,
                                org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate,
-                               @Lazy MarketAnalysisService marketAnalysisService) {
+                               @Lazy MarketAnalysisService marketAnalysisService,
+                               @Lazy com.example.stockPortfolio.PortfolioManagement.PortfolioHistoryService portfolioHistoryService) {
         this.finnhubService = finnhubService;
         this.newsApiService = newsApiService;
         this.marketGateway = marketGateway;
@@ -84,12 +86,14 @@ public class MarketDataScheduler {
         this.stockUniverseRepo = stockUniverseRepo;
         this.redisTemplate = redisTemplate;
         this.marketAnalysisService = marketAnalysisService;
+        this.portfolioHistoryService = portfolioHistoryService;
         
-        this.aiPrecomputationExecutor = new ThreadPoolExecutor(
-                3, 5, 60L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(100),
-                new ThreadPoolExecutor.CallerRunsPolicy()
-        );
+        // Java 21 virtual threads: each AI precomputation task gets its own lightweight
+        // carrier thread. No fixed pool size needed — VTs block cheaply on the Groq HTTP
+        // call without pinning OS threads, and JVM garbage-collects them when done.
+        // Replaces the fixed ThreadPoolExecutor(3,5) which could bottleneck when all 5
+        // threads were blocked waiting on slow Groq responses simultaneously.
+        this.aiPrecomputationExecutor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     @Scheduled(fixedRate = 60000, initialDelay = 120000)
@@ -111,16 +115,16 @@ public class MarketDataScheduler {
         List<StockUniverse> window = universe.subList(afterHoursIndex, end);
         afterHoursIndex = end;
 
-        // Find symbols in closed markets that need hydration (stale for > 12 hours)
+        // Find symbols in closed markets that need hydration.
+        // Uses the 60-minute after-hours freshness window (vs 10-min during live hours)
+        // so we refresh each symbol at most once per hour after close — enough for
+        // a reliable EOD price capture without burning TwelveData daily quota.
         List<String> targets = window.stream()
                 .filter(s -> {
                     boolean isIndian = symbolNormalizer.isIndian(s.getSymbol());
                     if (isIndian && !indiaClosed) return false;
                     if (!isIndian && !usClosed) return false;
-
-                    // During after-hours, we refresh if data is older than 12 hours
-                    // ensuring we get at least one fresh EOD price per night.
-                    return !marketGateway.isFresh(s.getSymbol()); 
+                    return !marketGateway.isFreshForAfterHours(s.getSymbol());
                 })
                 .map(StockUniverse::getSymbol)
                 .limit(AFTER_HOURS_BATCH_SIZE)
@@ -197,6 +201,26 @@ public class MarketDataScheduler {
         Object val = map.get(key);
         if (val instanceof Number) return ((Number) val).doubleValue();
         return 0.0;
+    }
+
+    // ── Portfolio value snapshots ─────────────────────────────────────────────
+    // Runs 5 minutes after each market close, capturing end-of-session portfolio
+    // value per user. One row per portfolio per day — lightweight, no event
+    // sourcing. The 5-minute buffer lets the last-minute scheduler hydration
+    // cycle complete so holdings prices are current when the snapshot is taken.
+
+    /** India close: 3:35 PM IST on weekdays. */
+    @Scheduled(cron = "0 35 15 * * MON-FRI", zone = "Asia/Kolkata")
+    public void snapshotPortfoliosAfterIndiaClose() {
+        log.info("Triggering portfolio snapshot after India market close.");
+        portfolioHistoryService.snapshotAllPortfolios();
+    }
+
+    /** US close: 4:05 PM ET on weekdays. */
+    @Scheduled(cron = "0 5 16 * * MON-FRI", zone = "America/New_York")
+    public void snapshotPortfoliosAfterUsClose() {
+        log.info("Triggering portfolio snapshot after US market close.");
+        portfolioHistoryService.snapshotAllPortfolios();
     }
 
     @jakarta.annotation.PreDestroy
@@ -294,9 +318,22 @@ public class MarketDataScheduler {
             }
         }
 
-        // 2. FILTER FOR STALE ONLY
+        // 2. FILTER: stale AND market currently open/pre-market for that symbol.
+        //
+        // Skipping symbols whose exchange is closed avoids burning TwelveData
+        // quota on Indian stocks during US-only hours (and vice versa). Cached
+        // last_close data serves those requests until the market reopens.
+        // User-urgent symbols bypass this filter — they are already resolved from
+        // Redis last_close by getLatestQuote() if the market is closed.
         List<String> symbolsToFetch = targets.stream()
                 .filter(s -> !marketGateway.isFresh(s))
+                .filter(s -> {
+                    boolean isIndian = symbolNormalizer.isIndian(s);
+                    if (isIndian) {
+                        return marketStatusService.isIndianMarketOpen() || marketStatusService.isIndianPreMarket();
+                    }
+                    return marketStatusService.isUsMarketOpen() || marketStatusService.isUsPreMarket();
+                })
                 .toList();
         
         if (symbolsToFetch.isEmpty()) return;

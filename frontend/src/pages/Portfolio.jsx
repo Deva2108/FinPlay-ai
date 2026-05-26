@@ -26,14 +26,6 @@ const COLORS = ['#3b82f6', '#8b5cf6', '#22c55e', '#f59e0b', '#ec4899', '#14b8a6'
 
 import { useMarket } from '../context/MarketContext';
 
-const MarketInsights = [
-  "Infrastructure and Energy sectors are showing strong accumulation patterns this week.",
-  "Inflation data cooling in major markets. Possible rate stabilization expected in Q3.",
-  "Tech giants reporting higher-than-expected cloud revenue growth.",
-  "Consumer spending shows resilience despite macro-economic tightening.",
-  "Semi-conductor supply chain stabilizing; outlook bullish for hardware manufacturing."
-];
-
 export default function Portfolio() {
   const { 
     balance, 
@@ -61,7 +53,6 @@ export default function Portfolio() {
 
   const [lastTotalValue, setLastTotalValue] = useState(0);
   const [valueDirection, setValueDirection] = useState(null);
-  const [insightIndex, setInsightIndex] = useState(0);
   const [feedback, setFeedback] = useState(null);
   const [insightContent, setInsightContent] = useState(null);
   const [isStockPanelOpen, setIsStockPanelOpen] = useState(false);
@@ -127,11 +118,6 @@ export default function Portfolio() {
     }
   };
 
-  useEffect(() => {
-    const interval = setInterval(() => setInsightIndex(prev => (prev + 1) % MarketInsights.length), 5000);
-    return () => clearInterval(interval);
-  }, []);
-
   // Split memos: stabilize derived arrays so unrelated state changes don't recompute everything.
   const holdings = useMemo(
     () => (Array.isArray(portfolio) ? portfolio : []).map(stock => ({
@@ -180,13 +166,46 @@ export default function Portfolio() {
 
   const adaptiveInsight = useMemo(() => getLearningInsight({ decisions: behaviorDecisions, missedOpportunities: behaviorMissed, holdings, totalCurrentValue }), [behaviorDecisions, behaviorMissed, holdings, totalCurrentValue]);
 
+  // Real portfolio intelligence — computed from actual holdings, not bucketed counts.
+  const intelligence = useMemo(() => {
+    if (holdings.length === 0) return null;
+
+    const sortedByValue = [...holdings].sort((a, b) => (Number(b?.currentValue) || 0) - (Number(a?.currentValue) || 0));
+    const sortedByGain = [...holdings].sort((a, b) => (Number(b?.gainPct) || 0) - (Number(a?.gainPct) || 0));
+
+    const biggest = sortedByValue[0];
+    const concentration = totalCurrentValue > 0 ? ((Number(biggest?.currentValue) || 0) / totalCurrentValue) * 100 : 0;
+
+    const winners = holdings.filter(h => (Number(h?.gainVal) || 0) > 0).length;
+    const winRate = holdings.length > 0 ? (winners / holdings.length) * 100 : 0;
+
+    const best = sortedByGain[0];
+    const worst = sortedByGain[sortedByGain.length - 1];
+
+    // Concentration risk label: any single position > 40% is "concentrated"
+    let concentrationLabel = 'Balanced';
+    if (concentration >= 50) concentrationLabel = 'Highly concentrated';
+    else if (concentration >= 35) concentrationLabel = 'Concentrated';
+    else if (holdings.length >= 5) concentrationLabel = 'Diversified';
+
+    return { biggest, concentration, concentrationLabel, winners, winRate, best, worst };
+  }, [holdings, totalCurrentValue]);
+
   const objectives = useMemo(() => {
-    const buyCount = (decisions || []).filter(d => d?.action === 'BUY').length;
+    if (!intelligence) {
+      return [
+        { title: "Open first position", progress: 0, icon: <Shield size={14}/>, hint: "Buy your first stock to begin tracking" }
+      ];
+    }
+    // Diversification: 5+ positions = full, with no single position > 40%
+    const diversifyProgress = Math.min(100, (holdings.length / 5) * 100);
+    // Concentration discipline: inverted concentration % (lower is better)
+    const concentrationProgress = Math.max(0, Math.min(100, 100 - Math.max(0, intelligence.concentration - 25)));
     return [
-      { title: "Diversify Sectors", progress: holdings.length >= 3 ? 100 : (holdings.length / 3) * 100, icon: <Shield size={14}/> },
-      { title: "Smart Decision Streak", progress: buyCount >= 5 ? 100 : (buyCount / 5) * 100, icon: <Zap size={14}/> }
+      { title: "Spread positions (target 5+)", progress: diversifyProgress, icon: <Shield size={14}/>, hint: `${holdings.length} open` },
+      { title: "Avoid over-concentration", progress: concentrationProgress, icon: <Zap size={14}/>, hint: `Largest = ${intelligence.concentration.toFixed(0)}%` }
     ];
-  }, [holdings.length, decisions]);
+  }, [intelligence, holdings.length]);
 
   useEffect(() => {
     if (totalCurrentValue > lastTotalValue && lastTotalValue !== 0) setValueDirection('up');
@@ -268,12 +287,12 @@ export default function Portfolio() {
                   <div className="text-center md:text-left space-y-2">
                      <div className="flex items-center justify-center md:justify-start gap-3">
                         <h1 className="text-2xl font-black text-white tracking-tighter uppercase">
-                          {loadingArchetype ? "Analyzing..." : (typeof archetype?.title === "string" ? archetype.title : archetype?.title?.text || "Evaluating Style")}
+                          {loadingArchetype ? "—" : (typeof archetype?.title === "string" ? archetype.title : archetype?.title?.text || "No pattern yet")}
                         </h1>
-                        <div className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/20 rounded-full text-[9px] font-black text-emerald-400 uppercase tracking-widest">Psych Profile</div>
+                        <div className="px-2 py-0.5 bg-white/5 border border-white/10 rounded-md text-[9px] font-black text-slate-400 uppercase tracking-widest">Based on {behaviorDecisions?.length || 0} decisions</div>
                      </div>
                      <p className="text-blue-100/70 font-medium text-sm leading-relaxed">
-                        {loadingArchetype ? "Deep-scanning your recent market decisions..." : (typeof archetype?.trait === "string" ? archetype.trait : archetype?.trait?.text || "Start making decisions in the Arena to unlock your psychological profile.")}
+                        {loadingArchetype ? "Loading…" : (typeof archetype?.trait === "string" ? archetype.trait : archetype?.trait?.text || "Make decisions in the Arena to start building a pattern.")}
                      </p>
                   </div>
                </div>
@@ -402,12 +421,25 @@ export default function Portfolio() {
                 <div className="bg-white/5 border border-white/5 p-6 rounded-2xl">
                   {loadingMentor ? (
                     <div className="flex flex-col items-center gap-3 py-4">
-                      <Loader2 size={24} className="animate-spin text-blue-400" />
-                      <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest animate-pulse text-center">Syncing with Live Intelligence...</span>
+                      <div className="w-6 h-6 border-2 border-white/10 border-t-blue-500 rounded-full animate-spin" />
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Generating advice</span>
+                    </div>
+                  ) : mentorAdvice ? (
+                    <p className="text-sm font-medium leading-relaxed text-blue-100/90">
+                      {typeof mentorAdvice === "string" ? mentorAdvice : mentorAdvice?.text || mentorAdvice?.message}
+                    </p>
+                  ) : intelligence ? (
+                    <div className="space-y-2 text-sm text-blue-100/90">
+                      <p className="font-medium leading-relaxed">
+                        You hold <span className="font-black text-white">{holdings.length}</span> position{holdings.length === 1 ? '' : 's'} worth {formatPrice(totalCurrentValue, marketCode)}, with {intelligence.winners} in profit and {holdings.length - intelligence.winners} underwater.
+                      </p>
+                      <p className="font-medium leading-relaxed text-blue-100/70">
+                        Largest position is <span className="font-black text-white">{intelligence.biggest?.symbol}</span> at {intelligence.concentration.toFixed(0)}% of the book — {intelligence.concentrationLabel.toLowerCase()}.
+                      </p>
                     </div>
                   ) : (
-                    <p className="text-sm font-bold leading-relaxed text-blue-100/90 italic">
-                      "{typeof mentorAdvice === "string" ? mentorAdvice : mentorAdvice?.text || mentorAdvice?.message || "Your portfolio is ready for analysis. Keep making trades to build a behavioral profile."}"
+                    <p className="text-sm font-medium leading-relaxed text-blue-100/70">
+                      Open a position to start receiving portfolio-level commentary.
                     </p>
                   )}
                 </div>
@@ -445,10 +477,15 @@ export default function Portfolio() {
                 </div>
               </div>
 
-              <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-                <p className="text-xs text-slate-400 font-medium leading-relaxed italic">
-                  "High liquidity allows for instant execution on market signals. Keep capital ready for high-conviction moves."
-                </p>
+              <div className="bg-white/5 rounded-2xl p-4 border border-white/5 grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Invested</p>
+                  <p className="text-sm font-black text-white tabular-nums">{formatPrice(totalInvested, marketCode)}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Cash ratio</p>
+                  <p className="text-sm font-black text-white tabular-nums">{totalInvested + balance > 0 ? `${((balance / (totalInvested + balance)) * 100).toFixed(0)}%` : '--'}</p>
+                </div>
               </div>
 
               <button 
@@ -466,32 +503,51 @@ export default function Portfolio() {
               )}
             </div>
 
-            {/* Market Thinking Feed */}
-            <section 
-              className="p-6 rounded-[2rem] bg-gradient-to-br from-[#0f172a] to-[#1e293b] border border-white/5 shadow-[0_0_20px_rgba(59,130,246,0.08)] hover:scale-[1.01] transition-all duration-300 relative overflow-hidden cursor-pointer group flex-1"
-              onClick={() => setInsightContent({
-                type: 'info',
-                title: 'Market Intelligence',
-                explanation: 'Live market analysis and sentiment tracking.',
-                insight: MarketInsights[insightIndex],
-                actions: [{ label: 'Got it' }]
-              })}
-            >
-               <div className="absolute top-0 right-0 p-6 opacity-5"><Newspaper size={100} className="text-blue-400"/></div>
-               <div className="flex items-center gap-2 mb-4 relative z-10">
-                  <div className="text-blue-400 animate-pulse">
-                    <BrainCircuit size={18} />
+            {/* Portfolio Intelligence — every number sourced from real holdings */}
+            <section className="p-6 rounded-[2rem] bg-gradient-to-br from-[#0f172a] to-[#1e293b] border border-white/5 relative overflow-hidden flex-1">
+               <div className="flex items-center justify-between mb-5 relative z-10">
+                  <div className="flex items-center gap-2">
+                     <BrainCircuit size={16} className="text-blue-400" />
+                     <h3 className="text-[10px] font-black text-white uppercase tracking-widest">Portfolio Intelligence</h3>
                   </div>
-                  <h3 className="text-lg font-semibold text-white tracking-tight">Market Thinking</h3>
+                  {intelligence && (
+                     <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${intelligence.concentration >= 50 ? 'bg-rose-500/10 text-rose-400' : intelligence.concentration >= 35 ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                        {intelligence.concentrationLabel}
+                     </span>
+                  )}
                </div>
-               <AnimatePresence mode="wait">
-                 <motion.div key={insightIndex} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="min-h-[80px] relative z-10">
-                    <p className="text-sm opacity-80 text-white leading-relaxed">{MarketInsights[insightIndex]}</p>
-                 </motion.div>
-               </AnimatePresence>
-               <div className="mt-6 pt-4 border-t border-white/5 relative z-10">
-                  <p className="text-xs font-bold text-blue-300">Suggestion: {riskLevel === 'High' ? "Hedge risk by exploring mid-cap." : "Trail stop-loss to protect gains."}</p>
-               </div>
+               {intelligence ? (
+                  <div className="space-y-4 relative z-10">
+                     <div className="grid grid-cols-2 gap-3">
+                        <div>
+                           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Win rate</p>
+                           <p className="text-lg font-black text-white tabular-nums">{intelligence.winRate.toFixed(0)}%</p>
+                           <p className="text-[10px] text-slate-500">{intelligence.winners}/{holdings.length} in profit</p>
+                        </div>
+                        <div>
+                           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Top weight</p>
+                           <p className="text-lg font-black text-white tabular-nums">{intelligence.concentration.toFixed(0)}%</p>
+                           <p className="text-[10px] text-slate-500">{intelligence.biggest?.symbol}</p>
+                        </div>
+                     </div>
+                     <div className="pt-3 border-t border-white/5 space-y-2">
+                        {intelligence.best && (
+                           <div className="flex justify-between items-center text-xs">
+                              <span className="text-slate-400">Best position</span>
+                              <span className="font-black text-emerald-400 tabular-nums">{intelligence.best.symbol} {safePct(intelligence.best.gainPct)}%</span>
+                           </div>
+                        )}
+                        {intelligence.worst && intelligence.worst.symbol !== intelligence.best?.symbol && (
+                           <div className="flex justify-between items-center text-xs">
+                              <span className="text-slate-400">Worst position</span>
+                              <span className={`font-black tabular-nums ${(Number(intelligence.worst.gainPct) || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{intelligence.worst.symbol} {safePct(intelligence.worst.gainPct)}%</span>
+                           </div>
+                        )}
+                     </div>
+                  </div>
+               ) : (
+                  <p className="text-xs text-slate-500 leading-relaxed">Intelligence unlocks after your first position.</p>
+               )}
             </section>
 
             {/* Objectives */}
@@ -502,16 +558,17 @@ export default function Portfolio() {
                </div>
                <div className="space-y-5">
                   {(objectives || []).map((obj, i) => (
-                    <div key={i} className="space-y-2">
-                       <div className="flex justify-between items-center">
-                          <span className="text-sm opacity-80 text-slate-300 uppercase tracking-widest">{obj.title}</span>
-                          <span className={`text-xs font-bold ${obj?.progress === 100 ? "text-emerald-400" : "text-blue-400"}`}>
-                            {obj?.progress === 100 ? <CheckCircle2 size={12}/> : `${obj?.progress?.toFixed(0)}%`}
+                    <div key={i} className="space-y-1.5">
+                       <div className="flex justify-between items-baseline">
+                          <span className="text-xs text-slate-300">{obj.title}</span>
+                          <span className={`text-[10px] font-black tabular-nums ${obj?.progress >= 100 ? "text-emerald-400" : "text-blue-400"}`}>
+                            {obj?.progress >= 100 ? <CheckCircle2 size={12}/> : `${obj?.progress?.toFixed(0)}%`}
                           </span>
                        </div>
-                       <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                          <motion.div initial={{ width: 0 }} animate={{ width: `${obj?.progress}%` }} transition={{ duration: 1.5 }} className={`h-full rounded-full ${obj?.progress === 100 ? "bg-emerald-500" : "bg-blue-500"}`} />
+                       <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                          <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(100, obj?.progress)}%` }} transition={{ duration: 1.5 }} className={`h-full rounded-full ${obj?.progress >= 100 ? "bg-emerald-500" : "bg-blue-500"}`} />
                        </div>
+                       {obj.hint && <p className="text-[9px] font-medium text-slate-500">{obj.hint}</p>}
                     </div>
                   ))}
                </div>

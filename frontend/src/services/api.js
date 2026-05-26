@@ -7,6 +7,31 @@ if (!import.meta.env.VITE_API_URL) {
   console.warn("VITE_API_URL is not defined. Falling back to http://localhost:8080");
 }
 
+// ─── Session-storage SWR cache ──────────────────────────────────────────────
+// Zero-dependency micro-cache. Stores { data, ts } in sessionStorage keyed by
+// `fp_swr_<key>`. Data is served instantly on next mount; the network call runs
+// in the background and overwrites if fresher. On sessionStorage write failure
+// (private browsing, full quota) we silently skip — the app still works.
+const SWR_NS = 'fp_swr_';
+export const swrRead = (key) => {
+  try {
+    const raw = sessionStorage.getItem(SWR_NS + key);
+    if (!raw) return null;
+    return JSON.parse(raw).data ?? null;
+  } catch { return null; }
+};
+export const swrWrite = (key, data) => {
+  try { sessionStorage.setItem(SWR_NS + key, JSON.stringify({ data, ts: Date.now() })); } catch {}
+};
+export const swrAge = (key) => {
+  try {
+    const raw = sessionStorage.getItem(SWR_NS + key);
+    if (!raw) return null;
+    const ts = JSON.parse(raw).ts;
+    return ts ? Math.floor((Date.now() - ts) / 1000) : null;
+  } catch { return null; }
+};
+
 export const API_ENDPOINTS = {
   AUTH: {
     LOGIN: '/api/auth/login',
@@ -19,6 +44,7 @@ export const API_ENDPOINTS = {
     BASE: '/api/portfolios',
     BALANCE: (id) => `/api/portfolios/${id}/balance`,
     MENTOR: (id) => `/api/portfolios/${id}/mentor`,
+    GROWTH: (id) => `/api/portfolios/${id}/growth`,
   },
   HOLDINGS: {
     BASE: '/api/holdings',
@@ -74,6 +100,58 @@ export const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 45000,
 });
+
+// ─── Inflight GET deduper ───────────────────────────────────────────────────
+// Multiple widgets mounting at once frequently fire identical GETs (e.g. three
+// places asking for /api/market/vibe?marketType=INDIA in the same tick). This
+// tiny map coalesces them into a single network call: the first request
+// registers a promise; subsequent identical requests reuse it. Entries are
+// removed in finally() so a failed request doesn't poison the cache.
+//
+// Scope: GET only (POST/PUT/DELETE/PATCH carry side-effects and must not be
+// deduped). Key includes URL + sorted params + Authorization header so two
+// users on the same browser can't share each other's responses.
+const inflightGets = new Map();
+
+const stableParamsKey = (params) => {
+  if (!params || typeof params !== 'object') return '';
+  const keys = Object.keys(params).sort();
+  const parts = [];
+  for (const k of keys) {
+    const v = params[k];
+    if (v === undefined) continue;
+    parts.push(`${k}=${typeof v === 'object' ? JSON.stringify(v) : String(v)}`);
+  }
+  return parts.join('&');
+};
+
+const inflightKey = (config) => {
+  const auth = config.headers?.Authorization || config.headers?.authorization || '';
+  // Use last 12 chars of token only (avoids holding full JWT in a string key longer than needed).
+  const authTail = typeof auth === 'string' && auth.length > 12 ? auth.slice(-12) : auth;
+  return `GET ${config.baseURL || ''}${config.url}?${stableParamsKey(config.params)}|${authTail}`;
+};
+
+// Capture whatever default adapter axios shipped with (xhr in the browser).
+// Works across axios v0.x and v1.x without relying on the v1-only getAdapter().
+const __baseAdapter = api.defaults.adapter || axios.defaults.adapter;
+
+api.defaults.adapter = async (config) => {
+  if ((config.method || 'get').toLowerCase() !== 'get') return __baseAdapter(config);
+  if (config._noDedupe) return __baseAdapter(config);
+
+  const key = inflightKey(config);
+  const existing = inflightGets.get(key);
+  if (existing) return existing;
+
+  const p = __baseAdapter(config).finally(() => {
+    // Remove in next microtask so any sync .then() handlers can chain without
+    // a fresh refire stomping on the same key.
+    queueMicrotask(() => inflightGets.delete(key));
+  });
+  inflightGets.set(key, p);
+  return p;
+};
 
 // Interceptor for JWT
 api.interceptors.request.use((config) => {
@@ -184,13 +262,30 @@ export const getPortfolio = async () => {
 
 export const getUserPortfolios = getPortfolio;
 
-export const syncAll = async () => {
-  const response = await api.get(`${API_ENDPOINTS.PORTFOLIO.BASE}/sync`);
+/**
+ * Critical-path hydration. Pass {light: true} (default) to skip behavior insights
+ * on the blocking call — the caller should fire `getUserInsights()` separately
+ * after first paint.
+ */
+export const syncAll = async ({ light = true } = {}) => {
+  const response = await api.get(`${API_ENDPOINTS.PORTFOLIO.BASE}/sync`, { params: light ? { light: true } : undefined });
   return readApiEnvelope(response);
 };
 
 export const getPortfolioMentorAdvice = async (portfolioId) => {
   const response = await api.get(API_ENDPOINTS.PORTFOLIO.MENTOR(portfolioId));
+  return readApiEnvelope(response);
+};
+
+/**
+ * Daily portfolio value series (cash + holdings) for the growth chart.
+ * Returns data points oldest-first: [{ date, value, cash, holdings }, ...].
+ * One entry per trading day captured at market close by the backend scheduler.
+ * @param {number} portfolioId
+ * @param {number} [days=90] window in calendar days (max 365)
+ */
+export const getPortfolioGrowth = async (portfolioId, days = 90) => {
+  const response = await api.get(API_ENDPOINTS.PORTFOLIO.GROWTH(portfolioId), { params: { days } });
   return readApiEnvelope(response);
 };
 
@@ -403,3 +498,12 @@ export const getVaultCards = async () => {
   const response = await api.get(API_ENDPOINTS.VAULT.CARDS);
   return readApiEnvelope(response);
 };
+
+// ─── Cold-start wake ping ────────────────────────────────────────────────────
+// Render / Fly.io free-tier backends spin down after 15 min of inactivity.
+// This fires exactly once per browser session (guarded by sessionStorage) and is
+// completely non-blocking — the UI never waits for it.
+if (typeof window !== 'undefined' && !sessionStorage.getItem('fp_pinged')) {
+  sessionStorage.setItem('fp_pinged', '1');
+  api.get('/actuator/health', { timeout: 12000, _noDedupe: true }).catch(() => {});
+}

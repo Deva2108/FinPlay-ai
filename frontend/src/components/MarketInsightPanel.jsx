@@ -195,20 +195,28 @@ function MarketInsightPanel({ isOpen, onClose, indexData, onTryGame }) {
                              </div>
                           </div>
                           
-                          <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 italic">
-                             <p className="text-xs text-blue-100/90 leading-relaxed">
-                                "Analogy: {aiInsight.richInsight?.analogy || 'Like the weather, market indices show the broad climate, while individual stocks are the local conditions.'}"
-                             </p>
-                          </div>
+                          {aiInsight.richInsight?.analogy && (
+                            <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
+                              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Volatility Context</p>
+                              <p className="text-xs text-blue-100/90 font-bold leading-relaxed tabular-nums">
+                                {aiInsight.richInsight.analogy}
+                              </p>
+                            </div>
+                          )}
 
                           <div className="space-y-2 pt-2">
                              <p className="text-[11px] font-bold text-slate-300">
                                 <Zap size={10} className="inline mr-2 text-blue-400" />
-                                {aiInsight.richInsight?.whatYouCanLearn || 'Focus on how the index reacts to major psychological support and resistance levels.'}
+                                {aiInsight.richInsight?.whatYouCanLearn || 'Monitor how the index reacts at key volume-weighted price levels.'}
                              </p>
-                             <p className="text-[10px] text-purple-400 font-black italic">
-                                {aiInsight.richInsight?.investorPerspective || '"In the short run, the market is a voting machine but in the long run, it is a weighing machine." — Benjamin Graham'}
-                             </p>
+                             {aiInsight.richInsight?.investorPerspective && (
+                               <div className="border-l-2 border-emerald-500/40 pl-3">
+                                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Range Position</p>
+                                 <p className="text-[10px] text-emerald-300 font-bold tabular-nums">
+                                   {aiInsight.richInsight.investorPerspective}
+                                 </p>
+                               </div>
+                             )}
                           </div>
                         </>
                       ) : (

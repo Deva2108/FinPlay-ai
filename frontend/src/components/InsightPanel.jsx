@@ -167,16 +167,17 @@ export default function InsightPanel({ isOpen, onClose, content }) {
                              )}
                           </div>
 
-                          {/* ANALOGY */}
+                          {/* VOLATILITY CONTEXT (formerly analogy — now quantified) */}
                           {(insightObject.analogy) && (
-                            <div className="bg-white/5 p-3 rounded-xl border border-white/5 italic">
-                              <p className="text-xs text-blue-100/90 leading-relaxed">
-                                "Think of it like this: {typeof insightObject.analogy === "string" ? insightObject.analogy : insightObject.analogy?.text || insightObject.analogy?.message || ''}"
+                            <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Volatility Context</p>
+                              <p className="text-xs font-bold text-blue-100/90 leading-relaxed tabular-nums">
+                                {typeof insightObject.analogy === "string" ? insightObject.analogy : insightObject.analogy?.text || insightObject.analogy?.message || ''}
                               </p>
                             </div>
                           )}
 
-                          {/* PERSPECTIVE & LEARN */}
+                          {/* RANGE NOTE & LEARN */}
                           <div className="space-y-2">
                              {(insightObject.whatYouCanLearn) && (
                                <div className="flex items-start gap-2">
@@ -185,19 +186,19 @@ export default function InsightPanel({ isOpen, onClose, content }) {
                                </div>
                              )}
                              {(insightObject.investorPerspective) && (
-                               <p className="text-[10px] text-purple-300 font-black italic border-l-2 border-purple-500/40 pl-3 py-1">
-                                  {typeof insightObject.investorPerspective === "string" ? insightObject.investorPerspective : insightObject.investorPerspective?.text || insightObject.investorPerspective?.message || ''}
-                                </p>
+                               <div className="border-l-2 border-emerald-500/40 pl-3 py-1">
+                                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Range Position</p>
+                                 <p className="text-[10px] text-emerald-300 font-bold tabular-nums">
+                                   {typeof insightObject.investorPerspective === "string" ? insightObject.investorPerspective : insightObject.investorPerspective?.text || insightObject.investorPerspective?.message || ''}
+                                 </p>
+                               </div>
                              )}
                           </div>
 
-                          {/* Technical Footnote / ML Teaser */}
-                          <div className="pt-2 flex items-center justify-between border-t border-white/5">
-                            <div className="flex items-center gap-2">
-                               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                               <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Logic: Deterministic Engine v1.5</span>
-                            </div>
-                            <span className="text-[8px] font-black text-blue-500/50 uppercase tracking-widest italic">Deep ML Predictor v2.0 Coming Soon</span>
+                          {/* Technical Footnote */}
+                          <div className="pt-2 flex items-center gap-2 border-t border-white/5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Deterministic Engine · Groq-backed</span>
                           </div>
 
                           {/* RESOURCES */}

@@ -64,8 +64,10 @@ function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointCl
 
   if (!hasData) {
     return (
-      <div style={{ height }} className="w-full flex items-center justify-center text-slate-500 font-bold uppercase text-[10px] tracking-[0.2em] bg-slate-900/40 rounded-3xl border border-white/5 shadow-inner">
-        Synchronizing Market Link...
+      <div style={{ height }} className="w-full flex flex-col items-center justify-center gap-2 bg-slate-900/40 rounded-3xl border border-white/5 shadow-inner">
+        <div className="w-2 h-2 rounded-full bg-slate-600 animate-pulse" />
+        <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.2em]">Waiting on price history</p>
+        <p className="text-slate-700 text-[9px] font-medium">Try a different timeframe or check back shortly</p>
       </div>
     );
   }

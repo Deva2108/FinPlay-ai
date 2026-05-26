@@ -49,8 +49,10 @@ export function TradingProvider({ children }) {
 
     setError(null);
     try {
-      // 1 aggregated call instead of 3 serial calls
-      const res = await syncAll();
+      // Critical hydration only — portfolios + holdings + balance. Behavior
+      // insights are fetched separately below so first paint isn't blocked
+      // on the (slower, cache-miss-prone) insight read.
+      const res = await syncAll({ light: true });
       const data = res?.data;
 
       if (data) {
@@ -58,7 +60,7 @@ export function TradingProvider({ children }) {
            setActivePortfolioId(data.portfolios[0].portfolioId);
         }
         setBalance(data.totalBalance || 100000);
-        
+
         const holdingsList = data.holdings?.holdings || [];
         const mappedPortfolio = (Array.isArray(holdingsList) ? holdingsList : []).map(h => ({
           symbol: h?.symbol,
@@ -72,17 +74,28 @@ export function TradingProvider({ children }) {
           gainPct: h?.gainPercentage,
           meta: h?.meta
         }));
-        
+
         setPortfolio(mappedPortfolio);
-        if (data.behaviorInsights) setUserInsights(data.behaviorInsights);
       }
     } catch (error) {
       console.error("Failed to sync application data", error);
       setError('Failed to load portfolio data.');
     } finally {
+      // Unblock first paint immediately — insights backfill happens below
+      // without holding the loading flag.
       setLoading(false);
     }
-  }, []);
+
+    // Deferred insights fetch — fires after first paint, no await on the
+    // critical hydration path. Failure here is non-fatal; userInsights keeps
+    // its default state. requestIdleCallback when available, else microtask.
+    const deferInsights = () => { refreshInsights().catch(() => {}); };
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(deferInsights, { timeout: 1500 });
+    } else {
+      setTimeout(deferInsights, 0);
+    }
+  }, [refreshInsights]);
 
   useEffect(() => {
     refreshData();

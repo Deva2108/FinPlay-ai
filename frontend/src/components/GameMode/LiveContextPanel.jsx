@@ -126,7 +126,9 @@ export default function LiveContextPanel({ stock, gameStep, onShowInsight }) {
                   ) : (
                     <div className="space-y-2">
                       <p className="font-bold">{aiExplanation?.whatHappened || 'Sentiment is stabilizing.'}</p>
-                      <p className="opacity-70 text-[10px] italic">"Analogy: {aiExplanation?.analogy || 'Individual stocks act as components of the broader market trend.'}"</p>
+                      {aiExplanation?.analogy && (
+                        <p className="opacity-80 text-[10px] font-bold tabular-nums">Vol: {aiExplanation.analogy}</p>
+                      )}
                     </div>
                   )}
                 </div>

@@ -154,11 +154,20 @@ public class ExternalMarketDataGateway {
 
         try {
             Map<String, Object> quoteResponse = restTemplate.getForObject(quoteUrl, Map.class);
-            if (quoteResponse == null || !quoteResponse.containsKey("price")) {
+            // Reject null, error envelopes ({"code":429,...}), and responses missing the price field.
+            if (quoteResponse == null || quoteResponse.containsKey("code") || !quoteResponse.containsKey("price")) {
+                if (quoteResponse != null && quoteResponse.containsKey("code")) {
+                    log.warn("TwelveData error for {}: code={} msg={}",
+                            twelveSymbol, quoteResponse.get("code"), quoteResponse.get("message"));
+                }
                 return null;
             }
 
             double price = safeParseDouble(quoteResponse.get("price"));
+            if (price <= 0) {
+                log.warn("TwelveData returned non-positive price for {}. Skipping.", twelveSymbol);
+                return null;
+            }
             double changePct = safeParseDouble(quoteResponse.getOrDefault("percent_change", "0"));
 
             Map<String, Object> res = new HashMap<>();
@@ -520,12 +529,28 @@ public class ExternalMarketDataGateway {
 
     private void processSingleTwelveQuote(Map<String, Object> data, Map<String, String> reverseMap, Map<String, Map<String, Object>> results) {
         if (data == null || !data.containsKey("symbol") || !data.containsKey("price")) return;
-        
+
+        // TwelveData returns error envelopes as HTTP 200 with a "code" field
+        // (e.g. {"code": 429, "message": "You have run out of API credits..."}).
+        // Reject these before they corrupt the Redis cache with zero/garbage prices.
+        if (data.containsKey("code")) {
+            log.warn("TwelveData error envelope for {}: code={} msg={}",
+                    data.get("symbol"), data.get("code"), data.get("message"));
+            return;
+        }
+
         String tSym = data.get("symbol").toString();
         String normalized = reverseMap.get(tSym);
         if (normalized == null) return;
 
         double price = safeParseDouble(data.get("price"));
+        // A zero or negative price means either parse failure or a TwelveData placeholder.
+        // Writing price=0 to Redis silently corrupts portfolio valuations.
+        if (price <= 0) {
+            log.warn("TwelveData returned non-positive price ({}) for {}. Skipping cache write.", price, normalized);
+            return;
+        }
+
         double changePct = safeParseDouble(data.getOrDefault("percent_change", "0"));
 
         Map<String, Object> quote = new HashMap<>();

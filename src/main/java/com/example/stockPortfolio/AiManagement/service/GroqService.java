@@ -53,19 +53,37 @@ public class GroqService {
         }
     }
 
+    /**
+     * Prompt focused on quantified, data-derived output. No metaphors, no
+     * famous quotes, no motivational filler.
+     *
+     * Field semantics:
+     *   analogy            → volatility / range context expressed as a number
+     *                        (e.g. "ATR is 1.8% of price, above 30-day avg of 1.2%")
+     *   investorPerspective → range-position or exposure note expressed as a number
+     *                        (e.g. "Price at 68% of 52-week range, 4% below resistance")
+     *
+     * These two fields reuse existing DTO/schema keys to avoid a migration,
+     * but the semantic contract is now quantitative, not anecdotal.
+     */
     private String buildPrompt(String topic, String context) {
+        String ctx = (context == null || context.isBlank()) ? "(none)" : context.length() > 400 ? context.substring(0, 400) : context;
         return """
                 Topic: %s
+                Context: %s
 
-                Context (may be empty): %s
+                Return ONE JSON object with these string keys (all required, ≤2 sentences each):
+                whatHappened     – factual description of the event or price move
+                whyItMatters     – direct market consequence, no filler
+                globalImpact     – specific cross-market effect
+                indiaImpact      – specific India/NSE effect
+                whatYouCanLearn  – one actionable takeaway for a retail trader
+                analogy          – quantified volatility context (e.g. "30-day realized vol is 18%%, 3pp above its 90-day avg of 15%%")
+                investorPerspective – quantified range/exposure note (e.g. "Price at 72%% of 52-week range, 5%% below the 3-month resistance at 19,850")
+                action           – one of: BUY | SELL | HOLD | WAIT | RESEARCH
+                confidence       – decimal 0.0–1.0
 
-                Write a FinPlay insight that explains the topic to a curious Indian beginner.
-                Connect the global picture to the Indian market where relevant.
-                Always answer 'so what?' for the user.
-
-                %s
-                """.formatted(topic == null ? "general market" : topic,
-                        context == null ? "" : context,
-                        InsightSchema.PROMPT_INSTRUCTIONS);
+                Rules: No metaphors. No famous quotes. No markdown. No surrounding prose. No nulls.
+                """.formatted(topic == null ? "general market" : topic, ctx);
     }
 }

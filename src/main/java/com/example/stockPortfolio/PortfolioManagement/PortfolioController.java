@@ -26,6 +26,7 @@ public class PortfolioController {
     private final com.example.stockPortfolio.MarketManagement.MarketGateway marketGateway;
     private final com.example.stockPortfolio.AiManagement.service.AiService aiService;
     private final com.example.stockPortfolio.HoldingsManagement.HoldingService holdingService;
+    private final PortfolioHistoryService portfolioHistoryService;
 
     private User getLoggedInUser() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -49,13 +50,26 @@ public class PortfolioController {
         return ResponseEntity.ok(ApiResponse.ok(response.getResult(), "Portfolios fetched successfully"));
     }
 
+    /**
+     * Aggregated bootstrap call.
+     *
+     * Pass {@code light=true} for the critical-path hydration only (portfolios +
+     * holdings + balance). Behavior insights are skipped — the frontend should
+     * fire {@code /api/decision/insights} as a deferred second call after first
+     * paint. This shaves a Redis read off the blocking path and lets the UI
+     * render meaningful state ~50–200ms sooner on cold cache.
+     *
+     * Default ({@code light=false}) preserves the old behavior for callers that
+     * have not been migrated.
+     */
     @GetMapping("/sync")
-    public ResponseEntity<ApiResponse<AggregatedSyncDTO>> syncAll() {
+    public ResponseEntity<ApiResponse<AggregatedSyncDTO>> syncAll(
+            @org.springframework.web.bind.annotation.RequestParam(required = false, defaultValue = "false") boolean light) {
         User user = getLoggedInUser();
         Long userId = user.getUserId();
-        
+
         List<PortfolioDTO> portfolios = portfolioService.getPortfoliosByUserId(userId).getResult();
-        
+
         com.example.stockPortfolio.HoldingsManagement.HoldingResponseDTO holdings = null;
         java.math.BigDecimal balance = java.math.BigDecimal.ZERO;
         if (!portfolios.isEmpty()) {
@@ -63,8 +77,8 @@ public class PortfolioController {
             holdings = holdingService.getHoldingsWithDetails(userId, primary.getPortfolioId());
             balance = primary.getBalance();
         }
-        
-        Object insights = marketGateway.getUserInsight(userId, "behavior");
+
+        Object insights = light ? null : marketGateway.getUserInsight(userId, "behavior");
 
         AggregatedSyncDTO sync = AggregatedSyncDTO.builder()
                 .portfolios(portfolios)
@@ -72,7 +86,7 @@ public class PortfolioController {
                 .behaviorInsights(insights)
                 .totalBalance(balance)
                 .build();
-                
+
         return ResponseEntity.ok(ApiResponse.ok(sync, "Application state synchronized"));
     }
 
@@ -102,6 +116,43 @@ public class PortfolioController {
     // Resets now go through `/api/admin/users/{id}/reset` (ROLE_ADMIN only).
     // Users who get stuck must DM an admin who triggers the reset on their behalf.
     // The PortfolioService.resetPortfolio method itself stays — it's invoked by AdminService.
+
+    /**
+     * Daily portfolio value series for the growth chart.
+     *
+     * Returns snapshots taken at each market close, oldest-first. One data point
+     * per trading day — enough for a clean area/line chart showing portfolio
+     * evolution over 30/90/180/365 days without any synthetic data fabrication.
+     *
+     * Ownership is verified by attempting getPortfolioById; 403 is thrown by the
+     * PortfolioAccessDeniedException handler if the portfolio belongs to another user.
+     *
+     * Query param {@code days} defaults to 90 (3 months).
+     */
+    @GetMapping("/{id}/growth")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getPortfolioGrowth(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "90") int days) {
+        User user = getLoggedInUser();
+        // Ownership check — throws PortfolioAccessDeniedException if not owned by user
+        portfolioService.getPortfolioById(id, user.getUserId());
+
+        List<PortfolioHistory> history = portfolioHistoryService.getGrowthHistory(id, Math.min(days, 365));
+
+        List<Map<String, Object>> series = history.stream().map(h -> {
+            Map<String, Object> point = new java.util.LinkedHashMap<>();
+            point.put("date", h.getSnapshotDate().toString());
+            point.put("value", h.getTotalValue());
+            point.put("cash", h.getCashBalance());
+            point.put("holdings", h.getHoldingsValue());
+            return point;
+        }).toList();
+
+        String msg = series.isEmpty()
+                ? "No snapshots yet — portfolio growth will appear after the first market close."
+                : series.size() + " daily snapshots";
+        return ResponseEntity.ok(ApiResponse.ok(series, msg));
+    }
 
     @GetMapping("/{id}/mentor")
 

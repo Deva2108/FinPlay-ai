@@ -5,6 +5,7 @@ import {
   Eye, ShoppingCart, BarChart3, Target, Trophy, BrainCircuit, Loader2
 } from 'lucide-react';
 import { getVaultDaily, getVaultCards } from '../services/api';
+import { useTrading } from '../context/TradingContext';
 
 const VaultGame = ({ scenario, onComplete }) => {
   const [showOutcome, setShowOutcome] = useState(false);
@@ -117,6 +118,14 @@ export default function Vault() {
   const [scenario, setScenario] = useState(null);
   const [loading, setLoading] = useState(false);
   const [cards, setCards] = useState([]);
+  const { decisions = [], userInsights } = useTrading();
+
+  const stats = React.useMemo(() => {
+    const total = decisions.length;
+    const actioned = decisions.filter(d => d?.action && d.action !== 'SKIP').length;
+    const conviction = total > 0 ? Math.round((actioned / total) * 100) : null;
+    return { total, conviction };
+  }, [decisions]);
 
   useEffect(() => {
     fetchData();
@@ -155,14 +164,16 @@ export default function Vault() {
              </div>
              <h1 className="text-4xl font-black text-white tracking-tighter uppercase">The Vault</h1>
           </div>
-          <p className="text-slate-500 font-black uppercase tracking-[0.2em] text-[10px]">Production Intelligence & Retention Layer</p>
+          <p className="text-slate-500 font-black uppercase tracking-[0.2em] text-[10px]">Daily scenarios · decision journal · behavioral feedback</p>
         </div>
-        <div className="flex items-center gap-4">
-           <div className="text-right">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</p>
-              <p className="text-sm font-black text-emerald-500 uppercase tracking-tighter">Secured</p>
-           </div>
-        </div>
+        {userInsights?.behaviorType && userInsights.behaviorType !== 'neutral' && (
+          <div className="flex items-center gap-4">
+             <div className="text-right">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Your Archetype</p>
+                <p className="text-sm font-black text-blue-400 uppercase tracking-tighter">{userInsights.behaviorType}</p>
+             </div>
+          </div>
+        )}
       </div>
 
       <AnimatePresence mode="wait">
@@ -201,15 +212,17 @@ export default function Vault() {
                 </div>
               </div>
 
-              {/* Stats Section */}
+              {/* Stats Section — sourced from real user decision data */}
               <div className="grid grid-cols-2 gap-4">
-                 <div className="p-8 bg-slate-900/40 border border-white/5 rounded-[2.5rem] space-y-1">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Players</p>
-                    <p className="text-2xl font-black text-white">4,812</p>
+                 <div className="p-6 bg-slate-900/40 border border-white/5 rounded-[2rem] space-y-1">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Decisions Logged</p>
+                    <p className="text-2xl font-black text-white tabular-nums">{stats.total}</p>
+                    <p className="text-[10px] font-bold text-slate-500">{stats.total === 0 ? 'Start your first scenario' : stats.total < 5 ? 'Keep building your track record' : 'Your behavioral profile is forming'}</p>
                  </div>
-                 <div className="p-8 bg-slate-900/40 border border-white/5 rounded-[2.5rem] space-y-1">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">System Health</p>
-                    <p className="text-2xl font-black text-emerald-500">100%</p>
+                 <div className="p-6 bg-slate-900/40 border border-white/5 rounded-[2rem] space-y-1">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Conviction Rate</p>
+                    <p className="text-2xl font-black text-emerald-500 tabular-nums">{stats.conviction == null ? '--' : `${stats.conviction}%`}</p>
+                    <p className="text-[10px] font-bold text-slate-500">Acted vs. skipped — higher = more decisive</p>
                  </div>
               </div>
             </div>

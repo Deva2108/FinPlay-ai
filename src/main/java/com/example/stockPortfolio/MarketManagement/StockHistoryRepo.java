@@ -12,7 +12,8 @@ public interface StockHistoryRepo extends JpaRepository<StockHistory, Long> {
     List<StockHistory> findBySymbolAndDateAfterOrderByDateAsc(String symbol, LocalDate date);
     boolean existsBySymbol(String symbol);
     boolean existsBySymbolAndDate(String symbol, LocalDate date);
-    
+    java.util.Optional<StockHistory> findBySymbolAndDate(String symbol, LocalDate date);
+
     @Query("SELECT MAX(h.date) FROM StockHistory h WHERE h.symbol = :symbol")
     LocalDate findLatestDateBySymbol(@Param("symbol") String symbol);
 }

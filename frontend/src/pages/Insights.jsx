@@ -31,7 +31,7 @@ export default function Insights() {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
         <Loader2 className="animate-spin text-blue-500" size={40} />
-        <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest animate-pulse">Scanning Global Intelligence...</p>
+        <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest animate-pulse">Loading investor commentary</p>
       </div>
     );
   }
@@ -47,11 +47,9 @@ export default function Insights() {
           <Zap className="text-blue-500" fill="currentColor" size={24} /> TRENDING INSIGHTS
         </h2>
         <div className="flex items-center gap-3">
-           <p className="text-slate-500 font-medium tracking-wide uppercase text-[10px]">What the market is thinking right now</p>
+           <p className="text-slate-500 font-medium tracking-wide uppercase text-[10px]">Curated commentary from notable investors · refreshed throughout the day</p>
            <div className="h-4 w-[1px] bg-white/10" />
-           <div className="px-2 py-0.5 bg-purple-500/10 border border-purple-500/20 rounded-md">
-              <span className="text-[8px] font-black text-purple-400 uppercase tracking-widest animate-pulse">ML Training in Progress...</span>
-           </div>
+           <span className="text-[10px] font-black text-slate-400 tabular-nums">{insights.length} active</span>
         </div>
       </div>
 
@@ -61,9 +59,9 @@ export default function Insights() {
             <Zap className="text-blue-400" size={32} />
           </div>
           <div className="space-y-2">
-            <h3 className="text-xl font-black text-white uppercase tracking-tight">Signals are Syncing</h3>
+            <h3 className="text-xl font-black text-white uppercase tracking-tight">No fresh insights yet</h3>
             <p className="text-slate-500 font-bold max-w-xs mx-auto text-sm leading-relaxed">
-              The market is stabilizing. We're currently scanning for meaningful institutional signals to guide your next move.
+              Curated investor commentary updates throughout the trading day. Check back shortly, or explore the live market in the meantime.
             </p>
           </div>
           <button 

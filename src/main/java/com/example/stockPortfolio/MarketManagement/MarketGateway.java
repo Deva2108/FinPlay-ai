@@ -19,6 +19,7 @@ public class MarketGateway {
     private final RedisTemplate<String, Object> redisTemplate;
     private final SymbolNormalizer symbolNormalizer;
     private final org.springframework.cache.CacheManager l1CacheManager;
+    private final MarketStatusService marketStatusService;
 
     public SymbolNormalizer getSymbolNormalizer() {
         return symbolNormalizer;
@@ -94,6 +95,29 @@ public class MarketGateway {
             return (System.currentTimeMillis() - lastUpdatedMs) < FRESHNESS_THRESHOLD_MS;
         } catch (Exception e) {
             log.warn("Freshness check failed for {}: {}", normalized, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Looser freshness window for after-hours hydration.
+     * Returns true when the symbol was updated within the last 60 minutes.
+     * During market hours use isFresh() (10-min window) for tighter staleness.
+     * After-hours, 60-minute window prevents burning TwelveData quota on
+     * symbols whose price will not change until the next session anyway.
+     */
+    private static final long AFTER_HOURS_FRESHNESS_MS = 60 * 60 * 1000L;
+
+    public boolean isFreshForAfterHours(String symbol) {
+        String normalized = normalizeSymbol(symbol);
+        if (normalized == null) return false;
+        try {
+            Object ts = redisTemplate.opsForValue().get(LAST_UPDATED_TS_PREFIX + normalized);
+            if (ts == null) return false;
+            long lastMs = Long.parseLong(ts.toString());
+            return (System.currentTimeMillis() - lastMs) < AFTER_HOURS_FRESHNESS_MS;
+        } catch (Exception e) {
+            log.warn("After-hours freshness check failed for {}: {}", normalized, e.getMessage());
             return false;
         }
     }
@@ -403,12 +427,26 @@ public class MarketGateway {
             log.error("Redis Read Error for {}: {}", symbol, e.getMessage());
         }
 
-        // 4. Final Failover: Queue for hydration and return SYNCING. 
-        // We no longer generate fake/mock quotes during the request cycle.
-        log.info("Symbol {} not in cache. Queueing for hydration and returning SYNCING.", normalized);
-        
-        // Mark as priority for the next scheduler cycle to fetch real data
+        // 4. Synchronous on-demand fetch — avoid the SYNCING round-trip for users who
+        //    just clicked a symbol that hasn't been cached yet (cold cache, new symbol, etc.).
+        //    We pay ~200–400ms latency once here rather than forcing the user to see a
+        //    "loading..." state and manually refresh. The scheduler continues to handle
+        //    background refresh cadence; markAsPriority ensures it re-hydrates regularly.
+        log.info("Symbol {} not in cache. Attempting synchronous on-demand fetch.", normalized);
+
+        // Keep in priority queue so the scheduler also refreshes this symbol in its next cycle.
         markAsPriority(normalized);
+
+        try {
+            Map<String, Object> live = externalMarketDataGateway.fetchQuoteWithFallback(normalized);
+            if (live != null && !live.isEmpty()) {
+                // Persist into the Redis mirror so all subsequent requests are served from cache.
+                updateMirror(normalized, live);
+                return createOkResponse(live, "LIVE");
+            }
+        } catch (Exception e) {
+            log.warn("Synchronous on-demand fetch failed for {}: {}", normalized, e.getMessage());
+        }
 
         return ApiResponse.syncing(null, "Price data is being synced. Please wait.", "SYNCING");
     }
@@ -550,22 +588,48 @@ public class MarketGateway {
         // Track as active symbol for local search
         redisTemplate.opsForSet().add(ACTIVE_SYMBOLS_SET_KEY, normalized);
 
-        // DAILY PERSISTENCE: Save to stock_history ONLY if it doesn't exist for today
+        // DAILY PERSISTENCE — market-aware upsert
+        //
+        // During market hours  → UPDATE today's row on every scheduler tick so
+        //                        the LAST price of the session becomes the close.
+        // After market close   → INSERT once only, preserving the genuine close.
+        //
+        // Previously this block used existsBySymbolAndDate guard which locked in
+        // the FIRST intraday price (market open) as the permanent daily close —
+        // a significant accuracy bug now fixed.
         try {
             java.time.LocalDate today = java.time.LocalDate.now();
             String market = symbolNormalizer.isIndian(normalized) ? "INDIA" : "US";
-            
-            if (!stockHistoryRepo.existsBySymbolAndDate(normalized, today)) {
-                double price = Double.parseDouble(data.get("price").toString());
-                StockHistory history = StockHistory.builder()
-                        .symbol(normalized)
-                        .market(market)
-                        .date(today)
-                        .close(java.math.BigDecimal.valueOf(price))
-                        .isSimulated(false)
-                        .build();
-                stockHistoryRepo.save(history);
-                log.info("Persisted daily history for {} ({}): {}", normalized, market, price);
+            boolean isIndian = symbolNormalizer.isIndian(normalized);
+            boolean isOpen = isIndian
+                    ? marketStatusService.isIndianMarketOpen()
+                    : marketStatusService.isUsMarketOpen();
+
+            double price = Double.parseDouble(data.get("price").toString());
+            java.math.BigDecimal priceBD = java.math.BigDecimal.valueOf(price)
+                    .setScale(4, java.math.RoundingMode.HALF_UP);
+
+            if (isOpen) {
+                // Upsert: update existing row if present, otherwise insert.
+                java.util.Optional<StockHistory> existing = stockHistoryRepo.findBySymbolAndDate(normalized, today);
+                if (existing.isPresent()) {
+                    StockHistory h = existing.get();
+                    h.setClose(priceBD);
+                    stockHistoryRepo.save(h);
+                } else {
+                    stockHistoryRepo.save(StockHistory.builder()
+                            .symbol(normalized).market(market).date(today)
+                            .close(priceBD).isSimulated(false).build());
+                    log.debug("New daily row for {} at {}", normalized, priceBD);
+                }
+            } else {
+                // After close: preserve existing genuine close; only create if missing.
+                if (!stockHistoryRepo.existsBySymbolAndDate(normalized, today)) {
+                    stockHistoryRepo.save(StockHistory.builder()
+                            .symbol(normalized).market(market).date(today)
+                            .close(priceBD).isSimulated(false).build());
+                    log.debug("After-hours initial row for {} at {}", normalized, priceBD);
+                }
             }
         } catch (Exception e) {
             log.warn("Failed to persist daily history for {}: {}", normalized, e.getMessage());
