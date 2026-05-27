@@ -136,9 +136,17 @@ function MarketInsightPanel({ isOpen, onClose, indexData, onTryGame }) {
                     ))}
                   </div>
                 </div>
-                <div className="bg-slate-950/50 rounded-3xl border border-white/5 p-4 relative overflow-hidden group/chart h-48 flex items-center justify-center">
+                {/* Fixed pixel height instead of Tailwind h-48 + flex.
+                    ResponsiveContainer measures its container via ResizeObserver.
+                    During the spring slide-in animation the panel width changes
+                    every frame, which was triggering continuous re-measurements
+                    and layout thrashing. A concrete pixel height (192px = h-48)
+                    gives ResizeObserver a stable value from the very first paint,
+                    eliminating the resize loop. flex/justify-center moved into the
+                    loading child so it only applies during the loading state. */}
+                <div className="bg-slate-950/50 rounded-3xl border border-white/5 p-4 relative overflow-hidden group/chart" style={{ height: '192px' }}>
                    {loadingChart ? (
-                     <div className="flex flex-col items-center gap-2">
+                     <div className="h-full flex flex-col items-center justify-center gap-2">
                         <Loader2 size={16} className="animate-spin text-blue-500" />
                         <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest animate-pulse">Syncing Mirror...</span>
                      </div>

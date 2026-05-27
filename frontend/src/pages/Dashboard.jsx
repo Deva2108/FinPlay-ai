@@ -2,17 +2,17 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Search, User, Bell, TrendingUp, TrendingDown, Zap, Newspaper, 
-  Lightbulb, Quote, Info, ChevronRight, Loader2, X, Star, 
+  Search, User, Bell, TrendingUp, TrendingDown, Zap, Newspaper,
+  Lightbulb, Quote, Info, ChevronRight, Loader2, X, Star,
   Activity, Target, Award, Shield, AlertTriangle, ArrowUpRight, HelpCircle,
-  BrainCircuit, Sparkles, PlayCircle, Quote as QuoteIcon, Bookmark
+  BrainCircuit, Sparkles, PlayCircle, Quote as QuoteIcon
 } from 'lucide-react';
 import GlassCard from '../components/GlassCard';
 import FinPlayArena from '../components/FinPlayArena';
 import LastMoveCard from '../components/GameMode/LastMoveCard';
 import { useStockPanel } from '../context/StockPanelContext';
 import { useMarket } from '../context/MarketContext';
-import { searchStocks, getIndices, getTrending, getMarketVibeResponse, getTutorialInsightResponse, getFamousInsights, getMarketPulse, api, API_ENDPOINTS, getWatchlist, swrRead, swrWrite } from '../services/api';
+import { searchStocks, getIndices, getTrending, getMarketVibeResponse, getTutorialInsightResponse, getFamousInsights, getMarketPulse, api, API_ENDPOINTS, swrRead, swrWrite } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import { formatPrice, safePct } from '../utils/formatters';
 import { useTrading } from '../context/TradingContext';
@@ -27,6 +27,7 @@ import NextEdgeCard from '../components/NextEdgeCard';
 import WidgetErrorBoundary from '../components/WidgetErrorBoundary';
 import { FreshnessLabel, LiveFeedRotator } from '../components/Dashboard/LiveBits';
 import LiveTicker from '../components/Dashboard/LiveTicker';
+import WatchlistWidget from '../components/Dashboard/WatchlistWidget';
 
  
 export default function Dashboard() {
@@ -48,7 +49,7 @@ export default function Dashboard() {
   const [loadingPulse, setLoadingPulse] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [famousInsights, setFamousInsights] = useState([]);
-  const [watchlist, setWatchlist] = useState([]);
+  // watchlist state moved into <WatchlistWidget /> — no longer lives in Dashboard
 
   const [insightContent, setInsightContent] = useState(null);
   const [marketInsightData, setMarketInsightData] = useState(null);
@@ -97,19 +98,16 @@ export default function Dashboard() {
     const ci = swrRead(idxKey);
     const ct = swrRead('trending');
     const cf = swrRead('famous');
-    const cw = swrRead('watchlist');
     if (ci) { setIndices(ci); setLoadingMarket(false); }
     if (ct) setTrending(ct);
     if (cf) setFamousInsights(cf);
-    if (cw) setWatchlist(cw);
 
     // ── Fire all 5 requests in parallel — no request blocks another ────────
     setLoadingPulse(true);
-    const [indicesRes, trendingRes, famousRes, watchlistRes, pulseRes] = await Promise.allSettled([
+    const [indicesRes, trendingRes, famousRes, pulseRes] = await Promise.allSettled([
       getIndices(marketMode),
       getTrending(),
       getFamousInsights("ALL"),
-      getWatchlist(),
       activePortfolioId ? getMarketPulse(activePortfolioId) : Promise.resolve(null)
     ]);
 
@@ -132,11 +130,6 @@ export default function Dashboard() {
     if (famousRes.status === 'fulfilled') {
       const d = famousRes.value?.data;
       if (Array.isArray(d)) { setFamousInsights(d); swrWrite('famous', d); }
-    }
-
-    if (watchlistRes.status === 'fulfilled') {
-      const d = watchlistRes.value?.data;
-      if (Array.isArray(d)) { setWatchlist(d); swrWrite('watchlist', d); }
     }
 
     if (pulseRes.status === 'fulfilled' && pulseRes.value?.data) {
@@ -451,19 +444,9 @@ export default function Dashboard() {
                    </div>
                 </div>
             </section>
-            <section className="space-y-4">
-                <div className="flex items-center gap-2 px-2"><Bookmark size={16} className="text-blue-500" /><h3 className="text-[10px] font-black text-white uppercase tracking-widest">Your Watchlist</h3></div>
-                <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-4 min-h-[100px] flex flex-col gap-3">
-                   {watchlist.length > 0 ? (
-                      watchlist.map(symbol => (
-                        <div key={symbol} onClick={() => navigate(`/stock/${symbol}`)} className="flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 cursor-pointer transition-all group">
-                           <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center font-black text-blue-500 text-[10px]">{symbol[0]}</div><span className="text-xs font-black text-white group-hover:text-blue-400 transition-colors">{symbol}</span></div>
-                           <ArrowUpRight size={12} className="text-slate-600 group-hover:text-blue-400" />
-                        </div>
-                      ))
-                   ) : ( <div className="flex-1 flex flex-col items-center justify-center py-6 text-center space-y-2"><p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">No assets tracked</p></div> )}
-                </div>
-            </section>
+            {/* WatchlistWidget owns its own state + 60s quote poll.
+                Isolated from Dashboard so price updates never re-render siblings. */}
+            <WatchlistWidget />
             <AnimatePresence mode="wait" initial={false}>
               {lastDecision ? ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}><LastMoveCard decision={lastDecision} onNext={() => setLastDecision(null)} /></motion.div>
               ) : (

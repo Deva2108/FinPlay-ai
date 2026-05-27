@@ -24,7 +24,17 @@ function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointCl
   // (tooltip hover, resize, parent state changes), causing chart stutter.
   const processedData = useMemo(() => {
     if (!hasData) return [];
-    return data.map((d, index) => {
+    // Downsample: for datasets > 60 points keep every Nth point.
+    // Preserves first + last so chart endpoints are always accurate.
+    // 60 points is sufficient visual resolution for any timeframe — the eye
+    // cannot distinguish individual candles beyond ~50 pts on a mobile viewport.
+    const MAX_SVG_POINTS = 60;
+    let source = data;
+    if (data.length > MAX_SVG_POINTS) {
+      const n = Math.ceil(data.length / MAX_SVG_POINTS);
+      source = data.filter((_, i) => i % n === 0 || i === data.length - 1);
+    }
+    return source.map((d, index) => {
       const rawTime = d.date || d.time || d.timestamp;
       let date;
       if (typeof rawTime === 'string') {
