@@ -31,14 +31,24 @@ COPY --from=build --chown=finplay:finplay /workspace/app.jar /app/app.jar
 USER finplay
 
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -Djava.security.egd=file:/dev/./urandom"
-ENV SERVER_PORT=8080
 
-EXPOSE 8080
+# Render provides PORT env var; we fallback to 8080 for local dev.
+# Do NOT set SERVER_PORT here as it can override the dynamic PORT on Render.
 
-# Spring Boot Actuator exposes /actuator/health
-# (configured in application.properties + application-prod.properties).
-HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
-    CMD wget -qO- http://localhost:${SERVER_PORT}/actuator/health \
-        | grep -q '"status":"UP"' || exit 1
+# Liveness probe: /actuator/health/liveness returns UP as soon as the JVM is
+# alive — it does NOT wait for Redis or DB connections to be established.
+#
+# Previously using /actuator/health caused the container to stay UNHEALTHY for
+# 10-30 s on Render cold boots (Redis TLS handshake + Neon serverless wake-up
+# added enough latency to fail the first several checks), which in turn delayed
+# Render's traffic routing and sometimes triggered "Port not detected" errors.
+#
+# /actuator/health/liveness is safe here: readiness (Redis + DB + full indicators)
+# is still visible at /actuator/health for operator monitoring; this healthcheck
+# just gates whether Render should replace the container, not whether it is ready.
+# probes.enabled=true is set in application.properties for all profiles.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=5 \
+    CMD sh -c "wget -qO- http://localhost:${PORT:-8080}/actuator/health/liveness \
+        | grep -q '\"status\":\"UP\"'" || exit 1
 
 ENTRYPOINT ["/sbin/tini", "--", "sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
