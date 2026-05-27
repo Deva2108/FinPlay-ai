@@ -497,6 +497,12 @@ public class ExternalMarketDataGateway {
      */
     public Map<String, Map<String, Object>> batchFallback(List<String> symbols, Exception e) {
         log.warn("TwelveData batch circuit-breaker/rate-limit triggered ({}): returning empty — Yahoo stagger path will compensate.", e.getMessage());
+        if (symbols != null) {
+            for (String s : symbols) {
+                String n = symbolNormalizer.normalize(s);
+                if (n != null) markFailureCooldown(n);
+            }
+        }
         return Collections.emptyMap();
     }
 
@@ -678,6 +684,19 @@ public class ExternalMarketDataGateway {
                 
                 if (response == null) continue;
 
+                // Handle global error envelope for the whole batch
+                if (response.containsKey("code") && !response.containsKey("price")) {
+                    Object codeVal = response.get("code");
+                    log.warn("TwelveData batch global error: code={} msg={}", codeVal, response.get("message"));
+                    if ("429".equals(String.valueOf(codeVal))) {
+                        for (String tSym : chunk) {
+                            String normalized = reverseMap.get(tSym);
+                            if (normalized != null) markFailureCooldown(normalized);
+                        }
+                    }
+                    continue;
+                }
+
                 // Twelve Data returns a single Map if only 1 symbol, or Map<Symbol, Map> if multiple
                 if (chunk.size() == 1) {
                     processSingleTwelveQuote(response, reverseMap, allResults);
@@ -694,6 +713,12 @@ public class ExternalMarketDataGateway {
                 break;
             } catch (Exception e) {
                 log.warn("Twelve Data Batch failed for chunk {}: {}", batchString, e.getMessage());
+                if (e.getMessage() != null && e.getMessage().contains("429")) {
+                    for (String tSym : chunk) {
+                        String normalized = reverseMap.get(tSym);
+                        if (normalized != null) markFailureCooldown(normalized);
+                    }
+                }
             }
         }
         return allResults;

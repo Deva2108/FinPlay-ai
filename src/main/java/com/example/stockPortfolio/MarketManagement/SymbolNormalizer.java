@@ -21,7 +21,7 @@ public class SymbolNormalizer {
         return Collections.unmodifiableMap(universeCache);
     }
 
-    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 1800000) // 30 minutes
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 1800000, initialDelay = 45000) // 30 minutes, 45s initial delay
     public void refreshCache() {
         log.info("Refreshing SymbolNormalizer universe cache...");
         List<StockUniverse> all = stockUniverseRepo.findAll();

@@ -68,10 +68,12 @@ public class CacheConfig {
     @Bean
     @Primary
     public CacheManager cacheManager(RedisConnectionFactory connectionFactory, ObjectMapper primaryObjectMapper) {
-        // Reuse Spring's primary ObjectMapper instead of allocating a fresh one
-        // (avoids a heavy ObjectMapper init during startup; JavaTimeModule is
-        // already registered by Spring Boot's Jackson auto-config).
-        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer(primaryObjectMapper);
+        // Clone the primary mapper so we don't pollute web endpoints with default typing
+        ObjectMapper cacheMapper = primaryObjectMapper.copy();
+        // Enable default typing so Redis stores @class property for generic cache deserialization
+        cacheMapper.activateDefaultTyping(cacheMapper.getPolymorphicTypeValidator(), ObjectMapper.DefaultTyping.NON_FINAL);
+        
+        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer(cacheMapper);
 
         // Standard config: JSON values, String keys
         RedisCacheConfiguration standardConfig = RedisCacheConfiguration.defaultCacheConfig()
