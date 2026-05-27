@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, TrendingUp, TrendingDown, Info, Activity, PieChart, DollarSign, Users, Briefcase, CheckCircle2, Zap, Target } from 'lucide-react';
 import { formatPrice } from '../utils/formatters';
-import { useTrading } from '../context/TradingContext';
+import { useBalance, useTradeActions } from '../context/TradingContext';
 import { getChartData, explainStock } from '../services/api';
 import ChartComponent from './ChartComponent';
 import BuyModal from './GameMode/BuyModal';
@@ -34,7 +34,8 @@ const SectionHeader = ({ icon: Icon, title, color = "text-blue-500" }) => (
 );
 
 export default function StockDetailPanel({ stock, isOpen, onClose }) {
-  const { balance, executeBuy } = useTrading();
+  const { balance } = useBalance();
+  const { executeBuy } = useTradeActions();
   const [isPurchased, setIsPurchased] = useState(false);
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [chartData, setChartData] = useState([]);

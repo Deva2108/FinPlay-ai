@@ -3,7 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { TrendingUp, TrendingDown, Activity, Bot, Sparkles, Loader2, Info, ArrowRight, MousePointer2, Zap, ArrowLeft, Building2 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useMarket } from '../context/MarketContext';
-import { getChartData, getStockDetails, getLiveQuotes } from '../services/api';
+import { getChartData, getStockDetails, getLiveQuotes, swrRead, swrWrite } from '../services/api';
+
+// Evaluated once — Framer Motion whileHover fires on touch via synthetic pointer
+// events, triggering x-transform animations during scroll and causing GPU repaint
+// churn. Gate to hover-capable devices only.
+const CAN_HOVER = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 import ChartComponent from '../components/ChartComponent';
 import InfoTooltip from '../components/InfoTooltip';
 
@@ -38,14 +43,17 @@ export default function LiveMarket() {
         getStockDetails(symbol),
         getLiveQuotes(constituentsList)
       ]);
-      
+
       if (detailsRes?.syncing) {
         setIsSyncing(true);
-      } else {
-        setDetails(detailsRes?.data);
+      } else if (detailsRes?.data) {
+        setDetails(detailsRes.data);
+        swrWrite(`lm_det_${symbol}`, detailsRes.data);
       }
-      
-      setConstituents(quotesRes?.data || []);
+
+      const quotes = quotesRes?.data || [];
+      setConstituents(quotes);
+      if (quotes.length > 0) swrWrite(`lm_quotes_${marketMode}`, quotes);
     } catch (err) {
       console.error("Failed to load market hub", err);
     } finally {
@@ -57,7 +65,9 @@ export default function LiveMarket() {
     setLoadingChart(true);
     try {
       const res = await getChartData(symbol, timeframe);
-      setChartData(res?.data?.data || []);
+      const pts = res?.data?.data || [];
+      setChartData(pts);
+      if (pts.length > 0) swrWrite(`lm_chart_${symbol}_${timeframe}`, pts);
     } catch (err) {
       setChartData([]);
     } finally {
@@ -65,11 +75,20 @@ export default function LiveMarket() {
     }
   };
 
+  // On symbol / market change: seed from SWR cache first (instant paint),
+  // then fetch fresh data in the background.
   useEffect(() => {
+    const cachedDet = swrRead(`lm_det_${symbol}`);
+    if (cachedDet) { setDetails(cachedDet); setLoading(false); }
+    const cachedQuotes = swrRead(`lm_quotes_${marketMode}`);
+    if (cachedQuotes) setConstituents(cachedQuotes);
     fetchData();
   }, [symbol, marketMode]);
 
+  // On timeframe change: seed chart from cache, then refetch.
   useEffect(() => {
+    const cachedChart = swrRead(`lm_chart_${symbol}_${timeframe}`);
+    if (cachedChart && cachedChart.length > 0) setChartData(cachedChart);
     fetchChart();
   }, [symbol, timeframe]);
 
@@ -232,7 +251,7 @@ export default function LiveMarket() {
             {constituents.map((stock) => (
               <motion.div
                 key={stock.symbol}
-                whileHover={{ x: 5 }}
+                whileHover={CAN_HOVER ? { x: 5 } : undefined}
                 onClick={() => navigate(`/stock/${stock.symbol}`)}
                 className="p-4 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-between cursor-pointer hover:bg-white/10 transition-all group"
               >

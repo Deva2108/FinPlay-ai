@@ -6,11 +6,12 @@ function IndexCard({ symbol, value, change, percent, onClick }) {
   const isPositive = (change || "").startsWith('+');
 
   return (
-    <div 
+    <div
       onClick={onClick}
-      className="bg-slate-900/60 p-3 sm:p-4 rounded-xl border border-white/5 hover:bg-slate-800/80 transition-all cursor-pointer group relative overflow-hidden"
+      className="bg-slate-900/60 p-3 sm:p-4 rounded-xl border border-white/5 [@media(hover:hover)]:hover:bg-slate-800/80 transition-colors cursor-pointer group relative overflow-hidden"
     >
-      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+      {/* Gradient overlay only on hover-capable devices — prevents sticky repaint on touch */}
+      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity pointer-events-none" />
       
       <div className="relative z-10">
         <div className="text-[7px] sm:text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1 flex items-center justify-between">

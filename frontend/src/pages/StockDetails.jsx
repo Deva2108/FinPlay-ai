@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getStockDetails, getChartData, getNews, getFamousInsights, explainStock, addToWatchlist, removeFromWatchlist, checkWatchlist } from '../services/api';
+import { getStockDetails, getChartData, getNews, getFamousInsights, explainStock, addToWatchlist, removeFromWatchlist, checkWatchlist, swrRead, swrWrite } from '../services/api';
 import ChartComponent from '../components/ChartComponent';
 import InsightPanel from '../components/InsightPanel';
 import { ArrowLeft, TrendingUp, TrendingDown, Activity, Briefcase, Info, Newspaper, Lightbulb, CheckCircle2, AlertTriangle, PlayCircle, Quote as QuoteIcon, ArrowRight, Zap, Target, Loader2, Bookmark, BookmarkCheck, BarChart3, PieChart, Landmark, Bot } from 'lucide-react';
@@ -17,10 +17,12 @@ export default function StockDetails() {
   const navigate = useNavigate();
   const { marketMode } = useMarket();
   
-  const [stock, setStock] = useState(null);
-  const [chart, setChart] = useState([]);
+  // Seed from SWR cache for instant paint — loading=false when cache exists
+  // so the full-page spinner is skipped on revisits.
+  const [stock, setStock] = useState(() => swrRead(`sd_det_${symbol}`) || null);
+  const [chart, setChart] = useState(() => swrRead(`sd_ch_${symbol}_1M`) || []);
   const [news, setNews] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !swrRead(`sd_det_${symbol}`));
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState(null);
   const [loadingChart, setLoadingChart] = useState(false);
@@ -29,7 +31,10 @@ export default function StockDetails() {
   const [watchlistLoading, setWatchlistLoading] = useState(false);
 
   const fetchData = async () => {
-    setLoading(true);
+    // Only show the blocking spinner when there's no cached data to display.
+    // When cache exists, the content is already painted — mark as silently syncing.
+    const hasCached = !!swrRead(`sd_det_${symbol}`);
+    if (!hasCached) setLoading(true);
     setError(null);
     try {
       const [detailsRes, newsRes, watchlistRes] = await Promise.all([
@@ -37,16 +42,17 @@ export default function StockDetails() {
         getNews(symbol),
         checkWatchlist(symbol)
       ]);
-      
+
       if (detailsRes?.syncing) {
         setIsSyncing(true);
       } else if (detailsRes?.error) {
         setError(detailsRes.message || "Failed to load stock details");
-      } else {
-        setStock(detailsRes?.data);
+      } else if (detailsRes?.data) {
+        setStock(detailsRes.data);
         setIsSyncing(false);
+        swrWrite(`sd_det_${symbol}`, detailsRes.data);
       }
-      
+
       setNews(newsRes?.data || []);
       setIsInWatchlist(watchlistRes?.data);
     } catch (err) {
@@ -60,20 +66,35 @@ export default function StockDetails() {
     setLoadingChart(true);
     try {
       const res = await getChartData(symbol, timeframe);
-      setChart(res?.data?.data || []);
+      const pts = res?.data?.data || [];
+      setChart(pts);
+      if (pts.length > 0) swrWrite(`sd_ch_${symbol}_${timeframe}`, pts);
     } finally {
       setLoadingChart(false);
     }
   };
 
-  useEffect(() => { fetchData(); }, [symbol]);
-  useEffect(() => { fetchChart(); }, [symbol, timeframe]);
+  useEffect(() => {
+    // Seed from cache on symbol change for instant paint, then refresh.
+    const cachedDet = swrRead(`sd_det_${symbol}`);
+    if (cachedDet) { setStock(cachedDet); setLoading(false); }
+    fetchData();
+  }, [symbol]);
+
+  useEffect(() => {
+    // Seed chart from cache on timeframe / symbol change, then refetch.
+    const cachedChart = swrRead(`sd_ch_${symbol}_${timeframe}`);
+    if (cachedChart && cachedChart.length > 0) setChart(cachedChart);
+    fetchChart();
+  }, [symbol, timeframe]);
 
   const isIndex = symbol?.startsWith('^') || symbol === 'SPY' || symbol === 'QQQ' || symbol === 'DIA';
   const isUp = stock?.change >= 0;
   const currency = stock?.currency || 'INR';
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-[#020617]"><Loader2 size={40} className="text-blue-500 animate-spin" /></div>;
+  // Only blank the page when there is genuinely no data to show.
+  // On revisits the SWR-seeded state is already painted so loading stays false.
+  if (loading && !stock) return <div className="h-screen flex items-center justify-center bg-[#020617]"><Loader2 size={40} className="text-blue-500 animate-spin" /></div>;
 
   if (error) return (
     <div className="h-screen flex flex-col items-center justify-center bg-[#020617] space-y-4">

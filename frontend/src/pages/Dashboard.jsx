@@ -12,7 +12,7 @@ import FinPlayArena from '../components/FinPlayArena';
 import LastMoveCard from '../components/GameMode/LastMoveCard';
 import { useStockPanel } from '../context/StockPanelContext';
 import { useMarket } from '../context/MarketContext';
-import { searchStocks, getIndices, getTrending, getMarketVibeResponse, getTutorialInsightResponse, getFamousInsights, getMarketPulse, api, API_ENDPOINTS, swrRead, swrWrite } from '../services/api';
+import { searchStocks, getMarketVibeResponse, getTutorialInsightResponse, getFamousInsights, getMarketPulse, api, API_ENDPOINTS, swrRead, swrWrite } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import { formatPrice, safePct } from '../utils/formatters';
 import { useTrading } from '../context/TradingContext';
@@ -21,12 +21,12 @@ import { useInsight } from '../hooks/useInsight';
 import GuideOverlay from '../components/GuideOverlay';
 
 import InsightPanel from '../components/InsightPanel';
-import IndexCard from '../components/IndexCard';
 import MarketInsightPanel from '../components/MarketInsightPanel';
 import NextEdgeCard from '../components/NextEdgeCard';
 import WidgetErrorBoundary from '../components/WidgetErrorBoundary';
 import { FreshnessLabel, LiveFeedRotator } from '../components/Dashboard/LiveBits';
-import LiveTicker from '../components/Dashboard/LiveTicker';
+import IndicesWidget from '../components/Dashboard/IndicesWidget';
+import MoversWidget from '../components/Dashboard/MoversWidget';
 import WatchlistWidget from '../components/Dashboard/WatchlistWidget';
 
  
@@ -35,10 +35,9 @@ export default function Dashboard() {
   const { marketMode, marketCode, setMarketMode } = useMarket();
   const { balance, recordDecision, decisions: allDecisions, activePortfolioId, missedOpportunities: allMissed, loading: portfolioLoading } = useTrading();
 
-  const [indices, setIndices] = useState([]);
-  const [trending, setTrending] = useState([]);
-  const [loadingMarket, setLoadingMarket] = useState(true);
-  const [syncingMarket, setSyncingMarket] = useState(false);
+  // indices + trending state moved into <IndicesWidget> and <MoversWidget>.
+  // Dashboard only receives the derived breadth counts it needs for the header bar.
+  const [breadthCounts, setBreadthCounts] = useState({ up: 0, down: 0 });
 
   const vibeParams = useMemo(() => ({ marketType: marketCode === 'IN' ? 'INDIA' : 'US' }), [marketCode]);
   const { data: vibeData, status: vibeStatus } = useInsight(API_ENDPOINTS.MARKET.VIBE, vibeParams);
@@ -94,39 +93,18 @@ export default function Dashboard() {
 
   const fetchMarketData = async () => {
     // ── Instant paint: hydrate from SWR cache before any network call ──────
-    const idxKey = `idx_${marketMode}`;
-    const ci = swrRead(idxKey);
-    const ct = swrRead('trending');
+    // indices + trending are now seeded inside their own widgets.
     const cf = swrRead('famous');
-    if (ci) { setIndices(ci); setLoadingMarket(false); }
-    if (ct) setTrending(ct);
     if (cf) setFamousInsights(cf);
 
-    // ── Fire all 5 requests in parallel — no request blocks another ────────
+    // ── Fire both requests in parallel — no request blocks another ─────────
     setLoadingPulse(true);
-    const [indicesRes, trendingRes, famousRes, pulseRes] = await Promise.allSettled([
-      getIndices(marketMode),
-      getTrending(),
+    const [famousRes, pulseRes] = await Promise.allSettled([
       getFamousInsights("ALL"),
       activePortfolioId ? getMarketPulse(activePortfolioId) : Promise.resolve(null)
     ]);
 
     // ── Hydrate independently — one failure cannot blank adjacent widgets ───
-    if (indicesRes.status === 'fulfilled') {
-      const d = indicesRes.value?.data;
-      if (Array.isArray(d)) { setIndices(d); swrWrite(idxKey, d); }
-      const syncing = indicesRes.value?.syncing;
-      setSyncingMarket(!!syncing);
-      setLoadingMarket(!!syncing);
-    } else {
-      setLoadingMarket(false);
-    }
-
-    if (trendingRes.status === 'fulfilled') {
-      const d = trendingRes.value?.data;
-      if (Array.isArray(d)) { setTrending(d); swrWrite('trending', d); }
-    }
-
     if (famousRes.status === 'fulfilled') {
       const d = famousRes.value?.data;
       if (Array.isArray(d)) { setFamousInsights(d); swrWrite('famous', d); }
@@ -145,17 +123,12 @@ export default function Dashboard() {
     return () => clearInterval(heavyPoll);
   }, [marketMode, activePortfolioId, portfolioLoading]);
 
-  // Lightweight live tick isolated in <LiveTicker /> leaf — see render below.
-  // Interval is 60s (aligned with backend scheduler cadence). Moving the interval
-  // out of Dashboard prevents unnecessary re-renders of unrelated Dashboard subtrees
-  // on each tick. Skips ticks when the tab is hidden.
-
-  // Flash detector: when trending up/down counts shift, briefly highlight the breadth widget.
+  // Flash detector: MoversWidget reports breadth via onBreadthChange → setBreadthCounts.
+  // When counts shift, briefly highlight the breadth bar in the header.
   const prevBreadthRef = useRef({ up: 0, down: 0 });
   const [breadthFlash, setBreadthFlash] = useState(null);
   useEffect(() => {
-    const up = (trending || []).filter(s => (s?.change || '').startsWith('+')).length;
-    const down = (trending || []).filter(s => (s?.change || '').startsWith('-')).length;
+    const { up, down } = breadthCounts;
     const prev = prevBreadthRef.current;
     if (prev.up !== 0 || prev.down !== 0) {
       if (up > prev.up) setBreadthFlash('up');
@@ -166,7 +139,7 @@ export default function Dashboard() {
       const t = setTimeout(() => setBreadthFlash(null), 800);
       return () => clearTimeout(t);
     }
-  }, [trending]);
+  }, [breadthCounts]);
 
   const recentlyViewed = useMemo(() => (allRecentlyViewed || []).filter(s => s?.market === marketCode), [allRecentlyViewed, marketCode]);
   const decisions = useMemo(() => (allDecisions || []).filter(d => d?.stock && (d?.stock?.currency === (marketCode === 'IN' ? 'INR' : 'INR'))), [allDecisions, marketCode]);
@@ -220,10 +193,6 @@ export default function Dashboard() {
   const accentColor = marketMode === "INDIA" ? "#FF9933" : "#3B82F6";
   const marketTone = marketMode === "INDIA" ? "bg-orange-500/5" : "bg-blue-500/5";
 
-  const activeData = useMemo(() => ({
-    indices: Array.isArray(indices) && indices.length > 0 ? indices : [],
-    trending: Array.isArray(trending) && trending.length > 0 ? trending : []
-  }), [indices, trending]);
 
   const handleIndexClick = (idx) => setMarketInsightData(idx);
   const handleTryGameFromIndex = (indexData) => {
@@ -233,15 +202,6 @@ export default function Dashboard() {
 
   return (
     <>
-    {/* LiveTicker: isolated leaf that owns the 60s poll for indices + trending.
-        Renders nothing — calls setIndices/setTrending/setLastRefresh via stable refs
-        so unrelated Dashboard subtrees don't re-render on each scheduler tick. */}
-    <LiveTicker
-      marketMode={marketMode}
-      onIndicesUpdate={setIndices}
-      onTrendingUpdate={setTrending}
-      onRefresh={() => setLastRefresh(new Date())}
-    />
     <InsightPanel isOpen={!!insightContent} onClose={() => setInsightContent(null)} content={insightContent} />
     <MarketInsightPanel isOpen={!!marketInsightData} onClose={() => setMarketInsightData(null)} indexData={marketInsightData} onTryGame={handleTryGameFromIndex} />
     <div className={`transition-colors duration-500 min-h-full w-full pb-20 ${marketTone}`}>
@@ -263,9 +223,7 @@ export default function Dashboard() {
             )}
           </div>
           {(() => {
-            const trend = Array.isArray(trending) ? trending : [];
-            const up = trend.filter(s => (s?.change || '').startsWith('+')).length;
-            const down = trend.filter(s => (s?.change || '').startsWith('-')).length;
+            const { up, down } = breadthCounts;
             const total = up + down;
             const breadth = total > 0 ? Math.round((up / total) * 100) : null;
             return (
@@ -365,16 +323,7 @@ export default function Dashboard() {
               </section>
            </div>
            <div className="lg:col-span-6">
-              <section className="bg-slate-900/40 p-1 rounded-2xl border border-slate-800/50">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1">
-                  <WidgetErrorBoundary name="Market Indices">
-                  {(Array.isArray(activeData?.indices) ? activeData.indices : []).map((idx) => (
-                    <IndexCard key={idx.symbol} {...idx} onClick={() => handleIndexClick(idx)} />
-                  ))}
-                  {activeData.indices.length === 0 && <div className="col-span-3 p-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest animate-pulse">Loading Indices...</div>}
-                  </WidgetErrorBoundary>
-                </div>
-              </section>
+              <IndicesWidget marketMode={marketMode} onIndexClick={handleIndexClick} />
            </div>
         </div>
 
@@ -421,29 +370,7 @@ export default function Dashboard() {
           </div>
 
           <div className="lg:col-span-4 space-y-6">
-            <section className="space-y-4">
-                <div className="flex items-center gap-2 px-2"><TrendingUp size={16} className="text-emerald-500" /><h3 className="text-[10px] font-black text-white uppercase tracking-widest">Top Movers</h3></div>
-                <div className="space-y-3">
-                   <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-4 space-y-3">
-                      <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">🔥 Top Gainers</p>
-                      {activeData.trending.filter(s => (s?.change || "").startsWith('+')).slice(0, 2).map(stock => (
-                        <div key={stock?.symbol} onClick={() => openStockPanel(stock)} className="flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 cursor-pointer transition-all group">
-                           <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center font-black text-emerald-500 text-[10px]">{(stock?.symbol || "")[0]}</div><span className="text-xs font-black text-white group-hover:text-emerald-400 transition-colors">{stock?.symbol}</span></div>
-                           <span className="text-xs font-black text-emerald-500">{stock?.change}</span>
-                        </div>
-                      ))}
-                   </div>
-                   <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-4 space-y-3">
-                      <p className="text-[9px] font-black text-rose-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">📉 Top Losers</p>
-                      {activeData.trending.filter(s => (s?.change || "").startsWith('-')).slice(0, 2).map(stock => (
-                        <div key={stock?.symbol} onClick={() => openStockPanel(stock)} className="flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 cursor-pointer transition-all group">
-                           <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center font-black text-rose-500 text-[10px]">{(stock?.symbol || "")[0]}</div><span className="text-xs font-black text-white group-hover:text-rose-400 transition-colors">{stock?.symbol}</span></div>
-                           <span className="text-xs font-black text-rose-500">{stock?.change}</span>
-                        </div>
-                      ))}
-                   </div>
-                </div>
-            </section>
+            <MoversWidget openStockPanel={openStockPanel} onBreadthChange={setBreadthCounts} />
             {/* WatchlistWidget owns its own state + 60s quote poll.
                 Isolated from Dashboard so price updates never re-render siblings. */}
             <WatchlistWidget />

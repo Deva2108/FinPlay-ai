@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
 import { loginUser } from '../services/api';
-import { useTrading } from '../context/TradingContext';
+import { useTradeActions } from '../context/TradingContext';
 import { Zap } from 'lucide-react';
 
 export default function Login() {
@@ -11,7 +11,7 @@ export default function Login() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { refreshData } = useTrading();
+  const { refreshData } = useTradeActions();
 
   const handleSubmit = async (e) => {
     e.preventDefault();

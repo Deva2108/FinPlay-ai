@@ -11,6 +11,9 @@ import {
 const TradingContext = createContext();
 const TradeStateContext = createContext();
 const TradeActionContext = createContext();
+// Granular leaf context — consumers re-render ONLY when balance changes,
+// not when portfolio, decisions, or any other state slice changes.
+const BalanceContext = createContext();
 
 export function TradingProvider({ children }) {
   const [balance, setBalance] = useState(100000);
@@ -255,13 +258,20 @@ export function TradingProvider({ children }) {
     ...state, ...actions
   }), [state, actions]);
 
+  // BalanceContext isolates the balance scalar so components that only need
+  // the current cash amount (StockDetailPanel, etc.) skip re-renders triggered
+  // by portfolio / decision / insight state changes.
+  const balanceValue = useMemo(() => ({ balance }), [balance]);
+
   // Nested providers ensure that components subscribing ONLY to actions never
   // rerender when state changes. The combined `TradingContext` remains for
-  // backwards compatibility with existing consumers.
+  // backwards compatibility with all existing consumers.
   return (
     <TradeActionContext.Provider value={actions}>
       <TradeStateContext.Provider value={state}>
-        <TradingContext.Provider value={contextValue}>{children}</TradingContext.Provider>
+        <BalanceContext.Provider value={balanceValue}>
+          <TradingContext.Provider value={contextValue}>{children}</TradingContext.Provider>
+        </BalanceContext.Provider>
       </TradeStateContext.Provider>
     </TradeActionContext.Provider>
   );
@@ -282,5 +292,13 @@ export function useTradeState() {
 export function useTradeActions() {
   const ctx = useContext(TradeActionContext);
   if (!ctx) throw new Error('useTradeActions must be used within a TradingProvider');
+  return ctx;
+}
+
+// Granular hook — subscribes only to balance changes.
+// Use instead of useTrading() in components that purely display/check cash balance.
+export function useBalance() {
+  const ctx = useContext(BalanceContext);
+  if (!ctx) throw new Error('useBalance must be used within a TradingProvider');
   return ctx;
 }

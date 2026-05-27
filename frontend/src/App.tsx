@@ -1,11 +1,22 @@
-import React, { Component, Suspense, lazy, ReactNode, useEffect, useState } from 'react';
+import React, { Component, Suspense, lazy, ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AlertTriangle } from 'lucide-react';
 
+// Full-screen fallback — only for routes that have no Layout shell (auth, onboarding).
 const LoadingScreen = () => (
   <div className="h-screen w-full bg-[#020617] flex flex-col items-center justify-center gap-4">
     <div className="w-10 h-10 border-2 border-white/10 border-t-blue-500 rounded-full animate-spin" />
     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em]">Loading</p>
+  </div>
+);
+
+// In-shell fallback — fits inside the persistent Layout + Topbar.
+// The 5rem offset matches Topbar's h-20. Layout stays mounted; only the
+// page content area shows this while the lazy chunk downloads.
+const PageFallback = () => (
+  <div className="flex flex-col items-center justify-center" style={{ height: 'calc(100vh - 5rem)' }}>
+    <div className="w-8 h-8 border-2 border-white/10 border-t-blue-500 rounded-full animate-spin" />
+    <p className="mt-4 text-[10px] font-bold text-slate-600 uppercase tracking-[0.3em]">Loading</p>
   </div>
 );
 
@@ -131,55 +142,145 @@ export default function App() {
       <MarketProvider>
         <TradingProvider>
           <StockPanelProvider>
-              <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-                <Suspense fallback={<LoadingScreen />}>
-                  <Routes>
-                    {/* Entry Logic */}
-                    <Route path="/" element={
-                      <PrivateRoute>
-                        {isFirstTime
-                          ? <Navigate to="/onboarding" replace />
-                          : <Layout><Dashboard /></Layout>
-                        }
-                      </PrivateRoute>
-                    } />
-
-                    {/* Onboarding (requires login — users register then land here) */}
-                    <Route path="/onboarding" element={
-                      <PrivateRoute><Onboarding /></PrivateRoute>
-                    } />
-
-                    {/* Protected Market Experience */}
-                    <Route path="/arena" element={
-                      <PrivateRoute>
-                        <Layout>
-                          <FinPlayArena
-                            onDecisionMade={() => {}}
-                            onShowInsight={() => {}}
-                            context=""
-                          />
+            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              {/*
+                Each lazy page is wrapped in its OWN <Suspense> INSIDE <Layout>.
+                This keeps Layout + Topbar mounted permanently across navigation —
+                they are no longer children of any Suspense boundary, so they
+                never unmount when a new chunk is loading. The previous single
+                outer <Suspense> unmounted the entire Layout on every route change,
+                causing the "blank flash / page reload" perception.
+              */}
+              <Routes>
+                {/* Entry Logic */}
+                <Route path="/" element={
+                  <PrivateRoute>
+                    {isFirstTime
+                      ? <Navigate to="/onboarding" replace />
+                      : <Layout>
+                          <Suspense fallback={<PageFallback />}>
+                            <Dashboard />
+                          </Suspense>
                         </Layout>
-                      </PrivateRoute>
-                    } />
-                    <Route path="/market" element={<PrivateRoute><Layout><RouteErrorBoundary name="Market"><LiveMarket /></RouteErrorBoundary></Layout></PrivateRoute>} />
-                    <Route path="/portfolio" element={<PrivateRoute><Layout><RouteErrorBoundary name="Portfolio"><Portfolio /></RouteErrorBoundary></Layout></PrivateRoute>} />
-                    <Route path="/vault" element={<PrivateRoute><Layout><RouteErrorBoundary name="Vault"><Vault /></RouteErrorBoundary></Layout></PrivateRoute>} />
-                    <Route path="/history" element={<PrivateRoute><Layout><RouteErrorBoundary name="History"><Decisions /></RouteErrorBoundary></Layout></PrivateRoute>} />
-                    <Route path="/insights" element={<PrivateRoute><Layout><RouteErrorBoundary name="Insights"><Insights /></RouteErrorBoundary></Layout></PrivateRoute>} />
-                    <Route path="/stock/:symbol" element={<PrivateRoute><Layout><RouteErrorBoundary name="Stock"><StockDetails /></RouteErrorBoundary></Layout></PrivateRoute>} />
-                    <Route path="/dashboard" element={<PrivateRoute><Layout><RouteErrorBoundary name="Dashboard"><Dashboard /></RouteErrorBoundary></Layout></PrivateRoute>} />
+                    }
+                  </PrivateRoute>
+                } />
 
-                    {/* Auth (public) */}
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/register" element={<Register />} />
+                {/* Onboarding — no Layout, full-screen fallback is appropriate */}
+                <Route path="/onboarding" element={
+                  <PrivateRoute>
+                    <Suspense fallback={<LoadingScreen />}>
+                      <Onboarding />
+                    </Suspense>
+                  </PrivateRoute>
+                } />
 
-                    {/* Fallback */}
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </Suspense>
-              </BrowserRouter>
-            </StockPanelProvider>
-          </TradingProvider>
+                {/* Protected routes — Layout is OUTSIDE Suspense so Topbar stays mounted */}
+                <Route path="/arena" element={
+                  <PrivateRoute>
+                    <Layout>
+                      <Suspense fallback={<PageFallback />}>
+                        <FinPlayArena onDecisionMade={() => {}} onShowInsight={() => {}} context="" />
+                      </Suspense>
+                    </Layout>
+                  </PrivateRoute>
+                } />
+                <Route path="/market" element={
+                  <PrivateRoute>
+                    <Layout>
+                      <RouteErrorBoundary name="Market">
+                        <Suspense fallback={<PageFallback />}>
+                          <LiveMarket />
+                        </Suspense>
+                      </RouteErrorBoundary>
+                    </Layout>
+                  </PrivateRoute>
+                } />
+                <Route path="/portfolio" element={
+                  <PrivateRoute>
+                    <Layout>
+                      <RouteErrorBoundary name="Portfolio">
+                        <Suspense fallback={<PageFallback />}>
+                          <Portfolio />
+                        </Suspense>
+                      </RouteErrorBoundary>
+                    </Layout>
+                  </PrivateRoute>
+                } />
+                <Route path="/vault" element={
+                  <PrivateRoute>
+                    <Layout>
+                      <RouteErrorBoundary name="Vault">
+                        <Suspense fallback={<PageFallback />}>
+                          <Vault />
+                        </Suspense>
+                      </RouteErrorBoundary>
+                    </Layout>
+                  </PrivateRoute>
+                } />
+                <Route path="/history" element={
+                  <PrivateRoute>
+                    <Layout>
+                      <RouteErrorBoundary name="History">
+                        <Suspense fallback={<PageFallback />}>
+                          <Decisions />
+                        </Suspense>
+                      </RouteErrorBoundary>
+                    </Layout>
+                  </PrivateRoute>
+                } />
+                <Route path="/insights" element={
+                  <PrivateRoute>
+                    <Layout>
+                      <RouteErrorBoundary name="Insights">
+                        <Suspense fallback={<PageFallback />}>
+                          <Insights />
+                        </Suspense>
+                      </RouteErrorBoundary>
+                    </Layout>
+                  </PrivateRoute>
+                } />
+                <Route path="/stock/:symbol" element={
+                  <PrivateRoute>
+                    <Layout>
+                      <RouteErrorBoundary name="Stock">
+                        <Suspense fallback={<PageFallback />}>
+                          <StockDetails />
+                        </Suspense>
+                      </RouteErrorBoundary>
+                    </Layout>
+                  </PrivateRoute>
+                } />
+                <Route path="/dashboard" element={
+                  <PrivateRoute>
+                    <Layout>
+                      <RouteErrorBoundary name="Dashboard">
+                        <Suspense fallback={<PageFallback />}>
+                          <Dashboard />
+                        </Suspense>
+                      </RouteErrorBoundary>
+                    </Layout>
+                  </PrivateRoute>
+                } />
+
+                {/* Auth (public) — no Layout, full-screen fallback */}
+                <Route path="/login" element={
+                  <Suspense fallback={<LoadingScreen />}>
+                    <Login />
+                  </Suspense>
+                } />
+                <Route path="/register" element={
+                  <Suspense fallback={<LoadingScreen />}>
+                    <Register />
+                  </Suspense>
+                } />
+
+                {/* Fallback */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </BrowserRouter>
+          </StockPanelProvider>
+        </TradingProvider>
       </MarketProvider>
     </ErrorBoundary>
   );

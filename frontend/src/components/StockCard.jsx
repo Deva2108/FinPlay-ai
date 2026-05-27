@@ -1,4 +1,10 @@
 import { motion } from 'framer-motion';
+
+// Evaluated once at module load — never changes after initial parse.
+// Framer Motion hover callbacks fire on touch (via synthetic pointer events),
+// causing parent setState calls on every scroll tap. Gating to pointer:fine
+// devices eliminates that entirely.
+const CAN_HOVER = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 import ChartComponent from './ChartComponent';
 import { formatPrice } from '../utils/formatters';
 
@@ -13,8 +19,8 @@ export default function StockCard({ stock, index, onHoverStart, onHoverEnd, isHo
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ delay: index * 0.1 }}
-      onHoverStart={onHoverStart}
-      onHoverEnd={onHoverEnd}
+      onHoverStart={CAN_HOVER ? onHoverStart : undefined}
+      onHoverEnd={CAN_HOVER ? onHoverEnd : undefined}
       className="glass rounded-2xl p-6 relative overflow-hidden group cursor-pointer border border-white/5 hover:border-white/20 transition-all"
     >
       <div className={`absolute top-0 right-0 w-32 h-32 blur-[50px] rounded-full opacity-20 pointer-events-none transition-all duration-500 ${isProfit ? 'bg-neonGreen' : 'bg-neonRed'} ${isHovered ? 'scale-150 opacity-40' : ''}`} />
