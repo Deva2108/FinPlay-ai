@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Manages daily portfolio value snapshots for growth charting.
@@ -45,10 +46,14 @@ public class PortfolioHistoryService {
             return;
         }
 
+        // UPSERT semantics: if a snapshot already exists for today (e.g. India close
+        // already fired), update it so the last market close of the day wins.
+        // Previously the exists-check caused the second close (US) to be silently
+        // skipped — US market movement was permanently lost from the growth chart.
         int saved = 0;
+        int updated = 0;
         for (Portfolio portfolio : portfolios) {
             Long pid = portfolio.getPortfolioId();
-            if (historyRepo.existsByPortfolioIdAndSnapshotDate(pid, today)) continue;
             try {
                 Long userId = portfolio.getUser().getUserId(); // safe inside @Transactional
                 HoldingResponseDTO holdingsResult = holdingService.getHoldingsWithDetails(userId, pid);
@@ -56,19 +61,31 @@ public class PortfolioHistoryService {
                         ? holdingsResult.getTotalValue() : BigDecimal.ZERO;
                 BigDecimal cash = portfolio.getBalance() != null ? portfolio.getBalance() : BigDecimal.ZERO;
 
-                historyRepo.save(PortfolioHistory.builder()
-                        .portfolioId(pid)
-                        .cashBalance(cash)
-                        .holdingsValue(holdingsValue)
-                        .totalValue(cash.add(holdingsValue))
-                        .snapshotDate(today)
-                        .build());
-                saved++;
+                Optional<PortfolioHistory> existing = historyRepo.findByPortfolioIdAndSnapshotDate(pid, today);
+                if (existing.isPresent()) {
+                    // Update in place — preserves the row id, cash balance, and date;
+                    // only refreshes the market-price-dependent fields.
+                    PortfolioHistory h = existing.get();
+                    h.setHoldingsValue(holdingsValue);
+                    h.setTotalValue(cash.add(holdingsValue));
+                    historyRepo.save(h);
+                    updated++;
+                } else {
+                    historyRepo.save(PortfolioHistory.builder()
+                            .portfolioId(pid)
+                            .cashBalance(cash)
+                            .holdingsValue(holdingsValue)
+                            .totalValue(cash.add(holdingsValue))
+                            .snapshotDate(today)
+                            .build());
+                    saved++;
+                }
             } catch (Exception e) {
                 log.warn("Snapshot skipped for portfolio {}: {}", pid, e.getMessage());
             }
         }
-        if (saved > 0) log.info("Daily portfolio snapshot: {} records written.", saved);
+        if (saved + updated > 0)
+            log.info("Daily portfolio snapshot: {} new, {} updated.", saved, updated);
     }
 
     /**

@@ -53,6 +53,9 @@ public class MarketGateway {
             Long size = redisTemplate.opsForSet().size(PRIORITY_SET_KEY);
             if (size != null && size < MAX_PRIORITY_SIZE) {
                 redisTemplate.opsForSet().add(PRIORITY_SET_KEY, normalized);
+                // Ensure the priority set self-expires — prevents orphaned entries when a
+                // user navigates away before the next scheduler tick drains the queue.
+                redisTemplate.expire(PRIORITY_SET_KEY, 120, TimeUnit.SECONDS);
             } else if (size != null) {
                 log.warn("Priority queue full ({}). Skipping symbol: {}", MAX_PRIORITY_SIZE, normalized);
             }
@@ -631,6 +634,11 @@ public class MarketGateway {
                     log.debug("After-hours initial row for {} at {}", normalized, priceBD);
                 }
             }
+        } catch (org.springframework.dao.DataIntegrityViolationException dive) {
+            // Two scheduler threads raced to INSERT the same (symbol, date) row.
+            // The other writer won — our data is still correct in Redis; ignore.
+            log.debug("Concurrent insert for {}/{}: ignored (other writer won the race)",
+                    normalized, java.time.LocalDate.now());
         } catch (Exception e) {
             log.warn("Failed to persist daily history for {}: {}", normalized, e.getMessage());
         }

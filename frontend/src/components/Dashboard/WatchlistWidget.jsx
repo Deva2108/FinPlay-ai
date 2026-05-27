@@ -50,6 +50,11 @@ const WatchlistWidget = React.memo(function WatchlistWidget() {
     cancelledRef.current = false;
 
     const fetchQuotes = async () => {
+      // Skip polling when the tab is hidden — the browser has backgrounded us or the
+      // user has switched tabs/minimised the PWA. Firing live quotes into a hidden tab
+      // burns TwelveData quota, backend CPU, and battery for zero user value.
+      // The next visible-tab tick (≤ 60 s away) will refresh immediately.
+      if (document.hidden) return;
       try {
         const res = await getLiveQuotes(symbols);
         if (Array.isArray(res?.data) && !cancelledRef.current) {

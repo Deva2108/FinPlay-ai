@@ -5,6 +5,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface PortfolioHistoryRepo extends JpaRepository<PortfolioHistory, Long> {
@@ -16,6 +17,9 @@ public interface PortfolioHistoryRepo extends JpaRepository<PortfolioHistory, Lo
     List<PortfolioHistory> findByPortfolioIdAndSnapshotDateAfterOrderBySnapshotDateAsc(
             Long portfolioId, LocalDate after);
 
-    /** Duplicate guard — called before each daily snapshot write. */
+    /** Upsert lookup — fetch the existing row for a given portfolio + date if present. */
+    Optional<PortfolioHistory> findByPortfolioIdAndSnapshotDate(Long portfolioId, LocalDate date);
+
+    /** Kept for backward-compatibility; prefer findByPortfolioIdAndSnapshotDate for upsert logic. */
     boolean existsByPortfolioIdAndSnapshotDate(Long portfolioId, LocalDate date);
 }

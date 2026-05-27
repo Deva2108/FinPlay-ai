@@ -18,7 +18,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import org.springframework.data.redis.core.RedisTemplate;
 
@@ -39,7 +43,16 @@ public class ExternalMarketDataGateway {
 
     private static final String LAST_UPDATED_TS_PREFIX = "stock:lastUpdated:";
     private static final String STOCK_KEY_PREFIX = "stock:";
+    // Must match MarketGateway.LAST_CLOSE_PREFIX — used by quoteFallback to serve
+    // durable stale data when all authenticated providers are unavailable.
+    private static final String LAST_CLOSE_KEY_PREFIX = "last_close:";
     private static final long FRESHNESS_THRESHOLD_MS = 10 * 60 * 1000L;
+
+    // In-flight deduplication: ensures concurrent cold requests for the same symbol
+    // share one CompletableFuture rather than fanning out to N simultaneous API calls.
+    // The future is removed from the map when it completes (success or failure).
+    private final ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> inFlightFetches =
+            new ConcurrentHashMap<>();
 
     // Symbol overrides for Indian markets (H6)
     private static final Map<String, String> SYMBOL_OVERRIDE_MAP = Map.of(
@@ -82,21 +95,61 @@ public class ExternalMarketDataGateway {
 
     /**
      * Tries to fetch a quote from the best available source.
-     * New Fallback Chain: Twelve Data (Key) -> Finnhub (Key) -> AlphaVantage (Key) -> Yahoo Public (Fallback)
-     * 
-     * IMPORTANT: Authenticated providers are tried first as they have defined quotas.
+     * Fallback Chain: Twelve Data → Finnhub/AlphaVantage → Yahoo Public.
+     *
+     * In-flight deduplication: if N concurrent callers request the same cold symbol,
+     * only one external API call is made — all others await the same CompletableFuture.
+     * This prevents request fan-out on cache misses (e.g. multiple users opening the
+     * same stock page simultaneously after a cache eviction).
      */
     public Map<String, Object> fetchQuoteWithFallback(String symbol) {
         String normalized = symbolNormalizer.normalize(symbol);
         if (normalized == null) return null;
 
-        // 0. FRESHNESS GUARD: If data was updated within 10 minutes, return cached value
+        // 0. FRESHNESS GUARD: return cached value immediately, no locking needed.
         Map<String, Object> cachedQuote = getCachedQuoteIfFresh(normalized);
         if (cachedQuote != null) {
             log.debug("Freshness guard: {} is fresh, skipping API call", normalized);
             return cachedQuote;
         }
 
+        // 1. IN-FLIGHT DEDUP: join an existing in-progress fetch or start a new one.
+        CompletableFuture<Map<String, Object>> future = inFlightFetches.computeIfAbsent(
+            normalized,
+            sym -> CompletableFuture
+                .supplyAsync(() -> doFetchWithFallbacks(sym))
+                .whenComplete((r, ex) -> inFlightFetches.remove(sym))
+        );
+
+        try {
+            return future.get(5, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            log.warn("In-flight fetch timed out for {}", normalized);
+            inFlightFetches.remove(normalized);
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (ExecutionException e) {
+            log.warn("In-flight fetch failed for {}: {}", normalized,
+                    e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Executes the authenticated-provider fallback chain for a single normalized symbol.
+     * Called on a background thread by fetchQuoteWithFallback's CompletableFuture.
+     *
+     * Yahoo is intentionally NOT called here. Calling Yahoo from this path would
+     * create a request storm: if TwelveData is down, every concurrent cold-cache
+     * request fans out to Yahoo simultaneously, risking shared-IP blacklisting.
+     *
+     * Yahoo hydration is handled exclusively by the scheduler's staggered async
+     * path (fetchYahooFallbackQuote, 500 ms/symbol pacing) — the right place for
+     * unauthenticated scraping because it is rate-controlled and non-user-blocking.
+     */
+    private Map<String, Object> doFetchWithFallbacks(String normalized) {
         // 1. TRY AUTHENTICATED PROVIDERS (Managed by local RateLimiters)
         try {
             Map<String, Object> twelveQuote = fetchTwelveDataQuote(normalized);
@@ -117,16 +170,29 @@ public class ExternalMarketDataGateway {
             log.debug("Standard authenticated providers failed for {}", normalized);
         }
 
-        // 2. LAST RESORT: YAHOO PUBLIC (Unauthenticated, high risk of IP block)
-        try {
-            Map<String, Object> yahooQuote = yahooFinanceService.fetchPublicQuote(normalized);
-            if (yahooQuote != null) return yahooQuote;
-        } catch (Exception e) {
-            log.warn("Yahoo Public fallback failed for {}: {}", normalized, e.getMessage());
-        }
-
-        log.error("All real providers failed for {}. Returning null.", normalized);
+        // Authenticated providers exhausted. Return null — the quoteFallback's stale
+        // cache layer or the SWR Redis mirror will serve the last known value to the UI.
+        log.debug("All authenticated providers failed for {}. Returning null.", normalized);
         return null;
+    }
+
+    /**
+     * Scheduler-only Yahoo public fallback.
+     *
+     * Called exclusively from MarketDataScheduler's staggered async loop
+     * (500 ms delay between symbols). Never invoked on user-request threads.
+     * Keeping this path separate from fetchQuoteWithFallback/doFetchWithFallbacks
+     * ensures a TwelveData outage cannot amplify into concurrent Yahoo scraping.
+     */
+    public Map<String, Object> fetchYahooFallbackQuote(String symbol) {
+        String normalized = symbolNormalizer.normalize(symbol);
+        if (normalized == null) return null;
+        try {
+            return yahooFinanceService.fetchPublicQuote(normalized);
+        } catch (Exception e) {
+            log.warn("Scheduler Yahoo fallback failed for {}: {}", normalized, e.getMessage());
+            return null;
+        }
     }
 
     @CircuitBreaker(name = "twelvedata", fallbackMethod = "quoteFallback")
@@ -353,8 +419,34 @@ public class ExternalMarketDataGateway {
     }
 
     // Fallbacks
+
+    /**
+     * Circuit-breaker / rate-limiter fallback for all authenticated quote providers.
+     *
+     * MUST NOT call Yahoo or any external HTTP endpoint — this runs synchronously on
+     * the caller's thread and fires once per request when a circuit is open.
+     * Calling Yahoo here would create a synchronized scraping storm under load.
+     *
+     * Strategy: serve the best available cached value from Redis so the SWR layer
+     * can keep the UI alive with stale-but-usable data while the scheduler's paced
+     * async Yahoo path catches up in the background.
+     */
     public Map<String, Object> quoteFallback(String symbol, Exception e) {
-        log.warn("Fallback triggered for quote {}: {}", symbol, e.getMessage());
+        String normalized = symbolNormalizer.normalize(symbol);
+        log.warn("Provider fallback for {} ({}): serving stale cache.", normalized, e.getMessage());
+        if (normalized != null) {
+            // 1. Warm cache (stock: key, 30-min TTL) — present during normal operation.
+            try {
+                Object warm = redisTemplate.opsForValue().get(STOCK_KEY_PREFIX + normalized);
+                if (warm instanceof Map) return (Map<String, Object>) warm;
+            } catch (Exception ignored) {}
+            // 2. Last-close snapshot (last_close: key, 7-day TTL) — durable through
+            //    extended outages; written by MarketGateway after every successful fetch.
+            try {
+                Object stale = redisTemplate.opsForValue().get(LAST_CLOSE_KEY_PREFIX + normalized);
+                if (stale instanceof Map) return (Map<String, Object>) stale;
+            } catch (Exception ignored) {}
+        }
         return null;
     }
 

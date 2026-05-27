@@ -283,13 +283,19 @@ public class MarketDataScheduler {
 
         // 1. COLLECT TARGETS (Strict Priority: Urgent -> Holdings -> Universe)
         Set<String> targets = new LinkedHashSet<>();
-        
+
+        // Track the normalized urgent symbols that were actually admitted to targets
+        // so we can drain precisely those entries from the priority Redis set —
+        // symbols that were present in urgentSymbols but filtered out of symbolsToFetch
+        // (e.g. their market was closed) must still be cleared to prevent queue jam.
+        Set<String> drainedPrioritySymbols = new LinkedHashSet<>();
+
         // Priority 1: Symbols user is currently looking at (from SYNCING state)
         urgentSymbols.stream()
             .map(symbolNormalizer::normalize)
             .filter(Objects::nonNull)
             .limit(TWELVEDATA_CYCLE_LIMIT) // Maximize TwelveData quota
-            .forEach(targets::add);
+            .forEach(s -> { targets.add(s); drainedPrioritySymbols.add(s); });
 
         // Priority 2: If we have room, fill with other active symbols (Holdings/Universe)
         if (targets.size() < TWELVEDATA_CYCLE_LIMIT) {
@@ -349,15 +355,16 @@ public class MarketDataScheduler {
                 quotes.forEach(marketGateway::updateMirror);
                 log.info("Hydration cycle: Successfully updated {} symbols.", quotes.size());
             } else {
-                // LAST RESORT: Yahoo slow-poll (Free, unthrottled but risk of ban).
-                // Non-blocking staggered scheduling preserves ~2 req/sec pacing
-                // without holding the scheduler thread.
-                log.warn("Batch failed. Falling back to individual Yahoo poll for {} symbols.", symbolsToFetch.size());
+                // LAST RESORT: Yahoo slow-poll via dedicated scheduler-only method.
+                // Uses fetchYahooFallbackQuote (not fetchQuoteWithFallback) so Yahoo is
+                // never triggered from user-request threads — only here, staggered.
+                // 500 ms pacing keeps Render's shared IP safe (~2 req/sec).
+                log.warn("Batch failed. Falling back to staggered Yahoo poll for {} symbols.", symbolsToFetch.size());
                 for (int i = 0; i < symbolsToFetch.size(); i++) {
                     final String s = symbolsToFetch.get(i);
                     CompletableFuture.runAsync(() -> {
                         try {
-                            Map<String, Object> q = externalMarketDataGateway.fetchQuoteWithFallback(s);
+                            Map<String, Object> q = externalMarketDataGateway.fetchYahooFallbackQuote(s);
                             if (q != null) marketGateway.updateMirror(s, q);
                         } catch (Exception ex) {
                             log.warn("Yahoo fallback fetch failed for {}: {}", s, ex.getMessage());
@@ -366,8 +373,11 @@ public class MarketDataScheduler {
                 }
             }
 
-            // 4. CLEANUP
-            marketGateway.clearPrioritySymbols(symbolsToFetch);
+            // 4. CLEANUP — clear ALL drained priority symbols (not just the ones that
+            // passed the freshness/market-open filter). Symbols filtered out of
+            // symbolsToFetch were still pulled from the Redis set this cycle and
+            // must be cleared; otherwise they re-enter every tick and jam the queue.
+            marketGateway.clearPrioritySymbols(drainedPrioritySymbols);
         } catch (Exception e) {
             log.error("Hydration cycle failed: {}", e.getMessage());
         }

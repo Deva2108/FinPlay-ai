@@ -12,7 +12,7 @@ import FinPlayArena from '../components/FinPlayArena';
 import LastMoveCard from '../components/GameMode/LastMoveCard';
 import { useStockPanel } from '../context/StockPanelContext';
 import { useMarket } from '../context/MarketContext';
-import { searchStocks, getMarketVibeResponse, getTutorialInsightResponse, getFamousInsights, getMarketPulse, api, API_ENDPOINTS, swrRead, swrWrite } from '../services/api';
+import { searchStocks, getTutorialInsightResponse, getFamousInsights, getMarketPulse, API_ENDPOINTS, swrRead, swrWrite } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import { formatPrice, safePct } from '../utils/formatters';
 import { useTrading } from '../context/TradingContext';

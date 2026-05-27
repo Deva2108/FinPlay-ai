@@ -12,6 +12,15 @@ export default defineConfig({
     hmr: { overlay: false }
   },
   build: {
+    // Explicit esbuild transpilation target.
+    // es2020 + safari14 + chrome92 is the conservative-but-modern sweet spot:
+    //   - Safari 14  = iOS 14 release (Sept 2020) — covers the long iOS upgrade tail
+    //   - Chrome 92  = July 2021 — modern Android WebViews beyond this support .at()
+    //   - ES2020     = syntax floor; esbuild transpiles away ES2021+ constructs
+    //                  (logical assignment &&=, ||=, ??=; Promise.any; etc.)
+    // This prevents future bundled deps from emitting syntax that crashes on the
+    // target devices.  Runtime gaps (like .at()) are covered by polyfills.ts.
+    target: ['es2020', 'safari14', 'chrome92'],
     // Raise the "large chunk" warning threshold — recharts alone exceeds 500 kB
     // minified; splitting it into its own chunk and warning at 800 kB avoids
     // false-positive noise while still catching genuinely oversized chunks.
