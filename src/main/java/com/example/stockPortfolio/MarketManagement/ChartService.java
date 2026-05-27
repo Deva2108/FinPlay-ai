@@ -2,6 +2,7 @@ package com.example.stockPortfolio.MarketManagement;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +31,7 @@ public class ChartService {
      * "Waiting on price history" placeholder), so returning an empty list is
      * always safe.
      */
+    @Cacheable(value = "stockCharts", key = "#symbol + '_' + #range")
     @Transactional(readOnly = true)
     public Map<String, Object> getChartData(String symbol, String range) {
         String normalized = symbolNormalizer.normalize(symbol);
@@ -63,10 +65,12 @@ public class ChartService {
 
     private LocalDate calculateCutoff(String range) {
         return switch (range.toUpperCase()) {
+            case "1D" -> LocalDate.now().minusDays(1);
+            case "1W" -> LocalDate.now().minusWeeks(1);
             case "1M" -> LocalDate.now().minusMonths(1);
             case "6M" -> LocalDate.now().minusMonths(6);
             case "1Y" -> LocalDate.now().minusYears(1);
-            default -> LocalDate.now().minusYears(3);
+            default   -> LocalDate.now().minusYears(3);
         };
     }
 }

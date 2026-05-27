@@ -8,6 +8,18 @@ function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointCl
   const hasData = Array.isArray(data) && data.length > 0;
   const currency = meta?.currency || (hasData ? data[0]?.currency : null) || 'INR';
 
+  // Intl.DateTimeFormat instances hoisted outside the map loop.
+  // toLocaleTimeString/toLocaleDateString/toLocaleString recreate a formatter
+  // object on every call when options are passed — on a 365-point 1Y dataset
+  // that means 1 095 formatter constructions per useMemo run, causing
+  // main-thread lockups and dropped frames on mobile. Hoisting to three
+  // stable instances reduces that to exactly 3 constructions per render.
+  const timeFmt = useMemo(() => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }), []);
+  const dateFmt = useMemo(() => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }), []);
+  const fullFmt = useMemo(() => new Intl.DateTimeFormat(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  }), []);
+
   // Memoize the per-point transformation — was rebuilt on every render
   // (tooltip hover, resize, parent state changes), causing chart stutter.
   const processedData = useMemo(() => {
@@ -24,13 +36,13 @@ function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointCl
       return {
         ...d,
         value,
-        formattedTime: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        formattedDate: date.toLocaleDateString([], { month: 'short', day: 'numeric' }),
-        fullDate: date.toLocaleString(),
+        formattedTime: timeFmt.format(date),
+        formattedDate: dateFmt.format(date),
+        fullDate:      fullFmt.format(date),
         index
       };
     });
-  }, [data, hasData]);
+  }, [data, hasData, timeFmt, dateFmt, fullFmt]);
 
   // Bounds computed once per dataset — single O(n) pass, avoids
   // Math.min/max(...spread) which is O(n) AND allocates a temporary array.

@@ -99,7 +99,7 @@ public class CacheConfig {
         RedisCacheConfiguration coreConfig = standardConfig.prefixCacheNameWith("core::");
         configurations.put("hotQuotes",   coreConfig.entryTtl(Duration.ofMinutes(5)));
         configurations.put("marketNews",  coreConfig.entryTtl(Duration.ofHours(2)));   // was 1h
-        configurations.put("stockCharts", coreConfig.entryTtl(Duration.ofHours(4)));   // was 1h — chart history rarely changes
+        configurations.put("stockCharts", coreConfig.entryTtl(Duration.ofMinutes(5)));  // 5 min — intraday freshness + DB protection
 
         // ── ai:: generated text — capped TTL, easier to evict ──
         RedisCacheConfiguration aiConfig = standardConfig.prefixCacheNameWith("ai::");
