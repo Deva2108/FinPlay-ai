@@ -84,6 +84,27 @@ public class MarketGateway {
         }
     }
 
+    // Must match ExternalMarketDataGateway.FAILURE_COOLDOWN_PREFIX.
+    // Kept as a package-level constant so MarketDataScheduler can filter without
+    // injecting ExternalMarketDataGateway (avoids a potential bean cycle).
+    static final String FAILURE_COOLDOWN_PREFIX = "market:fail:";
+
+    /**
+     * Returns true if the symbol is currently in a failure cooldown.
+     * A cooldown is set by ExternalMarketDataGateway when all providers fail or a
+     * TwelveData 429 is received. It auto-expires after 5 minutes.
+     * The scheduler uses this to skip dead symbols rather than re-queuing them every tick.
+     */
+    public boolean isInFailureCooldown(String symbol) {
+        String normalized = normalizeSymbol(symbol);
+        if (normalized == null) return false;
+        try {
+            return Boolean.TRUE.equals(redisTemplate.hasKey(FAILURE_COOLDOWN_PREFIX + normalized));
+        } catch (Exception e) {
+            return false; // fail-open: let the scheduler attempt the fetch if Redis is unreachable
+        }
+    }
+
     /**
      * Returns true if the symbol was updated within the freshness threshold (10 min).
      * Used by the scheduler and gateway to skip redundant API calls.

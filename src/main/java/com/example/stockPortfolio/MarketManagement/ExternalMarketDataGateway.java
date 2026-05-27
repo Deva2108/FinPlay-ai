@@ -48,18 +48,39 @@ public class ExternalMarketDataGateway {
     private static final String LAST_CLOSE_KEY_PREFIX = "last_close:";
     private static final long FRESHNESS_THRESHOLD_MS = 10 * 60 * 1000L;
 
+    // Failure cooldown: when all providers fail OR TwelveData returns 429, the symbol
+    // is written to Redis with a 5-minute TTL.  The fetch path and the scheduler both
+    // skip symbols whose cooldown key is present, breaking the infinite retry loop.
+    // Must match MarketGateway.FAILURE_COOLDOWN_PREFIX.
+    static final String FAILURE_COOLDOWN_PREFIX = "market:fail:";
+    private static final long FAILURE_COOLDOWN_TTL_MINUTES = 5L;
+
     // In-flight deduplication: ensures concurrent cold requests for the same symbol
     // share one CompletableFuture rather than fanning out to N simultaneous API calls.
     // The future is removed from the map when it completes (success or failure).
     private final ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> inFlightFetches =
             new ConcurrentHashMap<>();
 
-    // Symbol overrides for Indian markets (H6)
-    private static final Map<String, String> SYMBOL_OVERRIDE_MAP = Map.of(
-        "JIOFIN.NS", "JIOFIN:NSE",
-        "ZOMATO.NS", "ZOMATO:NSE",
-        "PAYTM.NS", "PAYTM:NSE",
-        "NYKAA.NS", "FSNRENEW:NSE"
+    // Provider-specific symbol overrides.
+    //
+    // Indian stocks: TwelveData uses SYMBOL:NSE format, not the Yahoo-style .NS suffix.
+    // Global indices: TwelveData does NOT accept the caret (^) prefix used by Yahoo/Finnhub.
+    //   ^NSEI  → NSEI   (Nifty 50)
+    //   ^BSESN → BSESN  (BSE Sensex)
+    //   ^DJI   → DJI    (Dow Jones)
+    //   ^IXIC  → IXIC   (NASDAQ Composite)
+    //   ^GSPC  → SPX    (S&P 500 — TwelveData uses "SPX", not "GSPC")
+    // Using Map.ofEntries to support > 10 entries (Map.of limit).
+    private static final Map<String, String> SYMBOL_OVERRIDE_MAP = Map.ofEntries(
+        Map.entry("JIOFIN.NS", "JIOFIN:NSE"),
+        Map.entry("ZOMATO.NS", "ZOMATO:NSE"),
+        Map.entry("PAYTM.NS",  "PAYTM:NSE"),
+        Map.entry("NYKAA.NS",  "FSNRENEW:NSE"),
+        Map.entry("^NSEI",     "NSEI"),
+        Map.entry("^BSESN",    "BSESN"),
+        Map.entry("^DJI",      "DJI"),
+        Map.entry("^IXIC",     "IXIC"),
+        Map.entry("^GSPC",     "SPX")
     );
 
     @Value("${finnhub.api.key}")
@@ -150,6 +171,14 @@ public class ExternalMarketDataGateway {
      * unauthenticated scraping because it is rate-controlled and non-user-blocking.
      */
     private Map<String, Object> doFetchWithFallbacks(String normalized) {
+        // 0. COOLDOWN CHECK: skip API calls entirely for recently-failed symbols.
+        //    Cooldown is set below when all providers fail, and by the 429 detector
+        //    in fetchTwelveDataQuote / processSingleTwelveQuote. Auto-expires in 5 min.
+        if (isInFailureCooldown(normalized)) {
+            log.debug("Symbol {} is in failure cooldown — skipping provider attempts.", normalized);
+            return null;
+        }
+
         // 1. TRY AUTHENTICATED PROVIDERS (Managed by local RateLimiters)
         try {
             Map<String, Object> twelveQuote = fetchTwelveDataQuote(normalized);
@@ -170,9 +199,10 @@ public class ExternalMarketDataGateway {
             log.debug("Standard authenticated providers failed for {}", normalized);
         }
 
-        // Authenticated providers exhausted. Return null — the quoteFallback's stale
-        // cache layer or the SWR Redis mirror will serve the last known value to the UI.
-        log.debug("All authenticated providers failed for {}. Returning null.", normalized);
+        // All providers exhausted — enter failure cooldown to stop the retry loop.
+        // The scheduler and this method will both skip this symbol for the next 5 min.
+        markFailureCooldown(normalized);
+        log.debug("All authenticated providers failed for {}. Cooldown set ({}m).", normalized, FAILURE_COOLDOWN_TTL_MINUTES);
         return null;
     }
 
@@ -223,8 +253,14 @@ public class ExternalMarketDataGateway {
             // Reject null, error envelopes ({"code":429,...}), and responses missing the price field.
             if (quoteResponse == null || quoteResponse.containsKey("code") || !quoteResponse.containsKey("price")) {
                 if (quoteResponse != null && quoteResponse.containsKey("code")) {
+                    Object codeVal = quoteResponse.get("code");
                     log.warn("TwelveData error for {}: code={} msg={}",
-                            twelveSymbol, quoteResponse.get("code"), quoteResponse.get("message"));
+                            twelveSymbol, codeVal, quoteResponse.get("message"));
+                    // 429 = quota exhausted (account-wide). Enter cooldown immediately so
+                    // subsequent in-flight requests for this symbol don't pile more credits on.
+                    if ("429".equals(String.valueOf(codeVal))) {
+                        markFailureCooldown(normalized);
+                    }
                 }
                 return null;
             }
@@ -455,6 +491,41 @@ public class ExternalMarketDataGateway {
         return Collections.emptyList();
     }
 
+    /**
+     * Circuit-breaker / rate-limiter fallback for the TwelveData batch endpoint.
+     * Returns an empty map so the scheduler falls through to the Yahoo staggered path.
+     */
+    public Map<String, Map<String, Object>> batchFallback(List<String> symbols, Exception e) {
+        log.warn("TwelveData batch circuit-breaker/rate-limit triggered ({}): returning empty — Yahoo stagger path will compensate.", e.getMessage());
+        return Collections.emptyMap();
+    }
+
+    // ── Failure Cooldown Helpers ──────────────────────────────────────────────────
+    // Writes a self-expiring Redis key when a symbol has exhausted all providers.
+    // Both the per-request path (doFetchWithFallbacks) and the scheduler filter
+    // (MarketGateway.isInFailureCooldown) read this key before issuing API calls,
+    // preventing the dead-symbol retry loop that burns 5 200+ TwelveData credits/day.
+
+    private void markFailureCooldown(String normalized) {
+        try {
+            redisTemplate.opsForValue().set(
+                    FAILURE_COOLDOWN_PREFIX + normalized,
+                    "1",
+                    FAILURE_COOLDOWN_TTL_MINUTES, TimeUnit.MINUTES);
+            log.debug("Failure cooldown set for {} ({}m TTL).", normalized, FAILURE_COOLDOWN_TTL_MINUTES);
+        } catch (Exception e) {
+            log.debug("Could not write failure cooldown for {}: {}", normalized, e.getMessage());
+        }
+    }
+
+    private boolean isInFailureCooldown(String normalized) {
+        try {
+            return Boolean.TRUE.equals(redisTemplate.hasKey(FAILURE_COOLDOWN_PREFIX + normalized));
+        } catch (Exception e) {
+            return false; // fail-open: let the fetch proceed when Redis is unreachable
+        }
+    }
+
     public List<Map<String, Object>> fetchHistoricalData(String symbol) {
         return fetchHistoricalData(symbol, "1Y");
     }
@@ -537,7 +608,16 @@ public class ExternalMarketDataGateway {
      * Free-tier safe: max 1 chunk of 8 symbols per invocation = max 8 credits per call.
      * Caller (MarketDataScheduler) is responsible for capping the symbol list at 6
      * before calling this method (TWELVEDATA_CYCLE_LIMIT).
+     *
+     * @CircuitBreaker: trips after sustained failures so the scheduler falls through to
+     *   the Yahoo stagger path rather than hammering a down TwelveData endpoint.
+     * @RateLimiter: shares the 8 req/min TwelveData bucket with the single-quote path,
+     *   creating a hard ceiling on credits consumed per minute across all callers.
+     * Note: @Retry intentionally omitted — retrying a batch call multiplies credit cost
+     *   (2 attempts × 8 symbols = up to 16 credits) without meaningful benefit.
      */
+    @CircuitBreaker(name = "twelvedata", fallbackMethod = "batchFallback")
+    @RateLimiter(name = "twelvedata")
     public Map<String, Map<String, Object>> fetchTwelveDataBatch(List<String> symbols) {
         if (twelveDataApiKey == null || twelveDataApiKey.isBlank() || symbols == null || symbols.isEmpty()) {
             return Collections.emptyMap();
@@ -626,8 +706,16 @@ public class ExternalMarketDataGateway {
         // (e.g. {"code": 429, "message": "You have run out of API credits..."}).
         // Reject these before they corrupt the Redis cache with zero/garbage prices.
         if (data.containsKey("code")) {
+            Object codeVal = data.get("code");
             log.warn("TwelveData error envelope for {}: code={} msg={}",
-                    data.get("symbol"), data.get("code"), data.get("message"));
+                    data.get("symbol"), codeVal, data.get("message"));
+            // 429 in a batch response is account-wide — mark the affected symbol for
+            // cooldown so the scheduler doesn't re-queue it in the next 60-second tick.
+            if ("429".equals(String.valueOf(codeVal))) {
+                String tSym = data.get("symbol") != null ? data.get("symbol").toString() : null;
+                String normalized = tSym != null ? reverseMap.get(tSym) : null;
+                if (normalized != null) markFailureCooldown(normalized);
+            }
             return;
         }
 

@@ -2,6 +2,10 @@ package com.example.stockPortfolio.MarketManagement;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -22,6 +26,22 @@ public class YahooFinanceService {
 
     private static final String YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/";
 
+    // Realistic browser headers prevent Yahoo's anti-bot layer from returning 403/429.
+    // Without these, the default Spring RestTemplate sends no User-Agent and is immediately
+    // fingerprinted as a headless client. The header values mirror a standard macOS Chrome
+    // request — generic enough to not require rotation.
+    private static final HttpHeaders BROWSER_HEADERS;
+    static {
+        BROWSER_HEADERS = new HttpHeaders();
+        BROWSER_HEADERS.set(HttpHeaders.USER_AGENT,
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        BROWSER_HEADERS.set(HttpHeaders.ACCEPT,
+                "application/json,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        BROWSER_HEADERS.set(HttpHeaders.ACCEPT_LANGUAGE, "en-US,en;q=0.9");
+        BROWSER_HEADERS.set(HttpHeaders.CONNECTION, "keep-alive");
+    }
+
     /**
      * Fetches real-time quote using Yahoo Finance public chart endpoint.
      * Works for US (^DJI, TSLA) and India (RELIANCE.NS, ^NSEI).
@@ -36,7 +56,8 @@ public class YahooFinanceService {
                 .toUriString();
 
         try {
-            org.springframework.http.ResponseEntity<Map> responseEntity = restTemplate.getForEntity(url, Map.class);
+            HttpEntity<Void> entity = new HttpEntity<>(BROWSER_HEADERS);
+            ResponseEntity<Map> responseEntity = restTemplate.exchange(url, HttpMethod.GET, entity, Map.class);
             
             Map<String, Object> response = responseEntity.getBody();
             if (response == null || !response.containsKey("chart")) return null;

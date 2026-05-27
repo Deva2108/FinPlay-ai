@@ -333,6 +333,10 @@ public class MarketDataScheduler {
         // Redis last_close by getLatestQuote() if the market is closed.
         List<String> symbolsToFetch = targets.stream()
                 .filter(s -> !marketGateway.isFresh(s))
+                // Skip symbols in failure cooldown (all providers failed or 429 received
+                // within the last 5 min). Prevents the dead-symbol retry loop that
+                // burns 60+ TwelveData credits/hour on permanently invalid symbols.
+                .filter(s -> !marketGateway.isInFailureCooldown(s))
                 .filter(s -> {
                     boolean isIndian = symbolNormalizer.isIndian(s);
                     if (isIndian) {
