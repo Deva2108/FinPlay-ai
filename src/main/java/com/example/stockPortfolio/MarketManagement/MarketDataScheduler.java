@@ -5,7 +5,6 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import com.example.stockPortfolio.HoldingsManagement.ApiResponse;
 import com.example.stockPortfolio.AiManagement.ExplainRequestDTO;
 
 import java.util.*;
@@ -37,6 +36,12 @@ public class MarketDataScheduler {
     private final StockUniverseRepo stockUniverseRepo;
     private final org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate;
     private final MarketAnalysisService marketAnalysisService;
+    // Centralized governance. Field-injected (not constructor) so the existing
+    // long constructor stays stable; @Lazy lets context refresh complete before
+    // any cross-bean wiring is exercised.
+    @org.springframework.beans.factory.annotation.Autowired
+    @Lazy
+    private MarketDataPolicyService policyService;
 
     private int highPriorityIndex = 0;
     private int normalIndex = 0;
@@ -104,29 +109,32 @@ public class MarketDataScheduler {
         // If both are open, the live hydration handles everything.
         if (!indiaClosed && !usClosed) return;
 
+        // ── Governance gate: skip after-hours hydration entirely when TwelveData
+        // is in provider-wide cooldown. After-hours data is the lowest-priority
+        // workload — it should never burn quota during an outage.
+        if (policyService.isProviderDisabled(MarketDataPolicyService.PROVIDER_TWELVEDATA)) {
+            log.debug("After-hours hydration skipped — TwelveData in provider-wide cooldown.");
+            return;
+        }
+
         log.debug("Starting market-aware after-hours hydration (India Closed: {}, US Closed: {})", indiaClosed, usClosed);
-        
-        List<StockUniverse> universe = stockUniverseRepo.findAll();
-        if (universe.isEmpty()) return;
 
-        // CONTINUOUS ROTATION: Slice the universe to ensure every stock gets updated eventually.
-        if (afterHoursIndex >= universe.size()) afterHoursIndex = 0;
-        int end = Math.min(afterHoursIndex + 20, universe.size()); // Take a 20-symbol window to scan
-        List<StockUniverse> window = universe.subList(afterHoursIndex, end);
-        afterHoursIndex = end;
+        // ── ACTIVE-ONLY targets (no universe rotation) ─────────────────────────
+        // After-hours hydration used to rotate through the full StockUniverse
+        // (a 20-symbol sliding window every minute = 1 200 credits/hour wasted
+        // on symbols nobody was viewing). Now: only refresh symbols that are
+        // currently active AND belong to a closed market that needs an EOD price.
+        Set<String> activeSymbols = policyService.listActiveSymbols();
+        if (activeSymbols.isEmpty()) return;
 
-        // Find symbols in closed markets that need hydration.
-        // Uses the 60-minute after-hours freshness window (vs 10-min during live hours)
-        // so we refresh each symbol at most once per hour after close — enough for
-        // a reliable EOD price capture without burning TwelveData daily quota.
-        List<String> targets = window.stream()
+        List<String> targets = activeSymbols.stream()
                 .filter(s -> {
-                    boolean isIndian = symbolNormalizer.isIndian(s.getSymbol());
+                    boolean isIndian = symbolNormalizer.isIndian(s);
                     if (isIndian && !indiaClosed) return false;
                     if (!isIndian && !usClosed) return false;
-                    return !marketGateway.isFreshForAfterHours(s.getSymbol());
+                    return !marketGateway.isFreshForAfterHours(s);
                 })
-                .map(StockUniverse::getSymbol)
+                .filter(s -> !marketGateway.isInFailureCooldown(s))
                 .limit(AFTER_HOURS_BATCH_SIZE)
                 .toList();
 
@@ -259,13 +267,19 @@ public class MarketDataScheduler {
         for (StockUniverse idx : indices) {
             aiPrecomputationExecutor.submit(() -> {
                 try {
-                    ApiResponse<Map<String, Object>> quoteResp = marketGateway.getLatestQuote(idx.getSymbol());
-                    if (quoteResp != null && quoteResp.getData() != null) {
-                        Map<String, Object> quote = quoteResp.getData();
-                        String prompt = String.format("Generate index insight for %s at %s.", idx.getName(), quote.get("price"));
-                        String insight = aiService.generateRichInsight(prompt);
-                        if (insight != null) marketGateway.updatePrecomputedInsight("index", idx.getSymbol(), insight);
+                    // CACHE-ONLY read — getLatestQuote would fall through to a synchronous
+                    // external fetch on cache miss, allowing the AI precompute job to burn
+                    // TwelveData quota. AI insights are best-effort enhancements; if the
+                    // quote isn't already in Redis, we simply skip this index's insight
+                    // for this cycle (it will be available on the next 30-min tick).
+                    Map<String, Object> quote = marketGateway.getCachedQuoteSnapshot(idx.getSymbol());
+                    if (quote == null) {
+                        log.debug("Skipping AI insight for {} — no cached quote (cache-only policy).", idx.getSymbol());
+                        return;
                     }
+                    String prompt = String.format("Generate index insight for %s at %s.", idx.getName(), quote.get("price"));
+                    String insight = aiService.generateRichInsight(prompt);
+                    if (insight != null) marketGateway.updatePrecomputedInsight("index", idx.getSymbol(), insight);
                 } catch (Exception e) {
                     log.error("Failed to precompute insight for {}: {}", idx.getSymbol(), e.getMessage());
                 }
@@ -275,68 +289,56 @@ public class MarketDataScheduler {
 
     @Scheduled(fixedRate = 60000, initialDelay = 30000)
     public void hydrateMarketMirror() {
+        // ── Governance gate 1: provider outage state ─────────────────────────
+        // If TwelveData was 429'd or hard-failed in the last 15 min, skip the
+        // entire cycle. The cooldown is set inside ExternalMarketDataGateway
+        // when a 429 envelope is detected. Eliminates the post-outage retry
+        // storm that previously kept hammering an exhausted provider.
+        if (policyService.isProviderDisabled(MarketDataPolicyService.PROVIDER_TWELVEDATA)) {
+            log.debug("Hydration cycle skipped — TwelveData in provider-wide cooldown.");
+            return;
+        }
+
         Set<String> urgentSymbols = marketGateway.getPrioritySymbols();
         boolean marketActive = marketStatusService.isAnyMarketActive();
 
-        // If no market is active (Open or Pre-Market) and no user is actively waiting, skip
+        // ── Governance gate 2: nothing to do ──────────────────────────────────
+        // Skip entirely when no market is active AND no user is currently waiting.
         if (!marketActive && urgentSymbols.isEmpty()) return;
 
-        // 1. COLLECT TARGETS (Strict Priority: Urgent -> Holdings -> Universe)
+        // ── Target selection: ACTIVE SYMBOLS ONLY ────────────────────────────
+        // Old model collected every symbol in the universe + every holding and
+        // rotated through them — burned 5 000+ credits/day on symbols nobody
+        // was viewing. New model: only urgent (user-blocking) + active (user-
+        // touched within the last 15 min). Cold symbols are served from Redis
+        // last_close until someone actually opens them.
         Set<String> targets = new LinkedHashSet<>();
-
-        // Track the normalized urgent symbols that were actually admitted to targets
-        // so we can drain precisely those entries from the priority Redis set —
-        // symbols that were present in urgentSymbols but filtered out of symbolsToFetch
-        // (e.g. their market was closed) must still be cleared to prevent queue jam.
         Set<String> drainedPrioritySymbols = new LinkedHashSet<>();
 
-        // Priority 1: Symbols user is currently looking at (from SYNCING state)
+        // Priority A — urgent symbols (a user is currently SYNCING / waiting).
         urgentSymbols.stream()
             .map(symbolNormalizer::normalize)
             .filter(Objects::nonNull)
-            .limit(TWELVEDATA_CYCLE_LIMIT) // Maximize TwelveData quota
+            .limit(TWELVEDATA_CYCLE_LIMIT)
             .forEach(s -> { targets.add(s); drainedPrioritySymbols.add(s); });
 
-        // Priority 2: If we have room, fill with other active symbols (Holdings/Universe)
+        // Priority B — active symbols (recently viewed by any user, 15-min TTL).
+        // This is the ONLY remaining source of background hydration targets.
         if (targets.size() < TWELVEDATA_CYCLE_LIMIT) {
-            List<String> allSymbols = new ArrayList<>();
-            try {
-                holdingRepo.findAllDistinctSymbols().forEach(s -> {
-                    String n = symbolNormalizer.normalize(s);
-                    if (n != null && !targets.contains(n)) allSymbols.add(n);
-                });
-            } catch (Exception e) {
-                log.warn("Failed to fetch holdings: {}", e.getMessage());
-            }
-            
-            getUniverse().forEach(s -> {
-                if (!targets.contains(s) && !allSymbols.contains(s)) {
-                    allSymbols.add(s);
-                }
-            });
-
-            int remainingSlots = TWELVEDATA_CYCLE_LIMIT - targets.size();
-            if (!allSymbols.isEmpty()) {
-                if (normalIndex >= allSymbols.size()) normalIndex = 0;
-                int endIndex = Math.min(normalIndex + remainingSlots, allSymbols.size());
-                targets.addAll(allSymbols.subList(normalIndex, endIndex));
-                normalIndex = endIndex;
+            for (String s : policyService.listActiveSymbols()) {
+                if (targets.size() >= TWELVEDATA_CYCLE_LIMIT) break;
+                String n = symbolNormalizer.normalize(s);
+                if (n != null) targets.add(n);
             }
         }
 
-        // 2. FILTER: stale AND market currently open/pre-market for that symbol.
-        //
-        // Skipping symbols whose exchange is closed avoids burning TwelveData
-        // quota on Indian stocks during US-only hours (and vice versa). Cached
-        // last_close data serves those requests until the market reopens.
-        // User-urgent symbols bypass this filter — they are already resolved from
-        // Redis last_close by getLatestQuote() if the market is closed.
+        // ── Final filter: master policy gate + market-hours guard ────────────
+        // Urgent symbols bypass shouldFetch() because the user is actively
+        // waiting; everything else must pass the full governance check
+        // (not fresh, not in cooldown, active). The market-hours filter
+        // avoids burning credits on closed exchanges.
         List<String> symbolsToFetch = targets.stream()
-                .filter(s -> !marketGateway.isFresh(s))
-                // Skip symbols in failure cooldown (all providers failed or 429 received
-                // within the last 5 min). Prevents the dead-symbol retry loop that
-                // burns 60+ TwelveData credits/hour on permanently invalid symbols.
-                .filter(s -> !marketGateway.isInFailureCooldown(s))
+                .filter(s -> urgentSymbols.contains(s) || policyService.shouldFetch(s))
                 .filter(s -> {
                     boolean isIndian = symbolNormalizer.isIndian(s);
                     if (isIndian) {

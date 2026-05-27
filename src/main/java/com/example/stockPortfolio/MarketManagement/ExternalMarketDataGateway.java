@@ -40,6 +40,10 @@ public class ExternalMarketDataGateway {
     private final RedisTemplate<String, Object> redisTemplate;
     private final YahooFinanceService yahooFinanceService;
     private final GoogleNewsRssService googleNewsRssService;
+    // Centralized governance — consulted before every outbound call and notified
+    // on any 429 / hard-failure so other systems immediately stop hitting the
+    // disabled provider for the cooldown window.
+    private final MarketDataPolicyService policyService;
 
     private static final String LAST_UPDATED_TS_PREFIX = "stock:lastUpdated:";
     private static final String STOCK_KEY_PREFIX = "stock:";
@@ -217,10 +221,22 @@ public class ExternalMarketDataGateway {
     public Map<String, Object> fetchYahooFallbackQuote(String symbol) {
         String normalized = symbolNormalizer.normalize(symbol);
         if (normalized == null) return null;
+        // Governance gate: if Yahoo was recently marked disabled (e.g. anti-bot block),
+        // skip immediately so we don't keep hitting an endpoint that's actively refusing us.
+        if (policyService.isProviderDisabled(MarketDataPolicyService.PROVIDER_YAHOO)) {
+            log.debug("Yahoo globally disabled by policy — skipping fallback for {}.", normalized);
+            return null;
+        }
         try {
-            return yahooFinanceService.fetchPublicQuote(normalized);
+            Map<String, Object> q = yahooFinanceService.fetchPublicQuote(normalized);
+            // Hard-failure heuristic: yahooFinanceService returns null on 403/429/parse errors.
+            // We don't disable on a single null (could be a single bad symbol), but the per-symbol
+            // cooldown stops the loop and the next cycle will try again.
+            return q;
         } catch (Exception e) {
-            log.warn("Scheduler Yahoo fallback failed for {}: {}", normalized, e.getMessage());
+            // Outright exceptions from Yahoo (TLS, DNS, IP block) — assume provider-wide trouble.
+            log.warn("Scheduler Yahoo fallback exception for {}: {} — marking Yahoo disabled.", normalized, e.getMessage());
+            policyService.markProviderDisabled(MarketDataPolicyService.PROVIDER_YAHOO);
             return null;
         }
     }
@@ -230,6 +246,12 @@ public class ExternalMarketDataGateway {
     @Retry(name = "default")
     public Map<String, Object> fetchTwelveDataQuote(String symbol) {
         if (twelveDataApiKey == null || twelveDataApiKey.isBlank() || "mock".equalsIgnoreCase(twelveDataApiKey)) return null;
+        // Governance gate: if TwelveData was recently disabled (429 or repeated hard-fail),
+        // return null immediately so the fallback chain (Finnhub/AlphaVantage → Yahoo) takes over.
+        if (policyService.isProviderDisabled(MarketDataPolicyService.PROVIDER_TWELVEDATA)) {
+            log.debug("TwelveData globally disabled by policy — skipping quote fetch for {}.", symbol);
+            return null;
+        }
 
         String normalized = symbolNormalizer.normalize(symbol);
         
@@ -256,10 +278,13 @@ public class ExternalMarketDataGateway {
                     Object codeVal = quoteResponse.get("code");
                     log.warn("TwelveData error for {}: code={} msg={}",
                             twelveSymbol, codeVal, quoteResponse.get("message"));
-                    // 429 = quota exhausted (account-wide). Enter cooldown immediately so
-                    // subsequent in-flight requests for this symbol don't pile more credits on.
+                    // 429 = quota exhausted (account-wide).
+                    //   Per-symbol cooldown:  prevents this symbol from being retried for 5 min.
+                    //   Provider-wide outage: prevents ALL OTHER symbols from hitting TwelveData
+                    //                         for 15 min — this is the central governance signal.
                     if ("429".equals(String.valueOf(codeVal))) {
                         markFailureCooldown(normalized);
+                        policyService.markProviderDisabled(MarketDataPolicyService.PROVIDER_TWELVEDATA);
                     }
                 }
                 return null;
@@ -734,12 +759,15 @@ public class ExternalMarketDataGateway {
             Object codeVal = data.get("code");
             log.warn("TwelveData error envelope for {}: code={} msg={}",
                     data.get("symbol"), codeVal, data.get("message"));
-            // 429 in a batch response is account-wide — mark the affected symbol for
-            // cooldown so the scheduler doesn't re-queue it in the next 60-second tick.
+            // 429 in a batch response is account-wide:
+            //   - per-symbol cooldown stops this symbol re-entering next tick
+            //   - provider-wide outage stops the WHOLE scheduler from calling TwelveData
+            //     for the next 15 min (governance broadcast)
             if ("429".equals(String.valueOf(codeVal))) {
                 String tSym = data.get("symbol") != null ? data.get("symbol").toString() : null;
                 String normalized = tSym != null ? reverseMap.get(tSym) : null;
                 if (normalized != null) markFailureCooldown(normalized);
+                policyService.markProviderDisabled(MarketDataPolicyService.PROVIDER_TWELVEDATA);
             }
             return;
         }

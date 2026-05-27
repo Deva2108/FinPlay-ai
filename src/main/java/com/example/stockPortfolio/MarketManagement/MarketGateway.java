@@ -20,6 +20,10 @@ public class MarketGateway {
     private final SymbolNormalizer symbolNormalizer;
     private final org.springframework.cache.CacheManager l1CacheManager;
     private final MarketStatusService marketStatusService;
+    // Centralized fetch-governance authority. Consulted on every read-path that
+    // touches the priority queue so user-viewed symbols are marked active and
+    // become eligible for the scheduler's next hydration cycle.
+    private final MarketDataPolicyService policyService;
 
     public SymbolNormalizer getSymbolNormalizer() {
         return symbolNormalizer;
@@ -59,7 +63,35 @@ public class MarketGateway {
             } else if (size != null) {
                 log.warn("Priority queue full ({}). Skipping symbol: {}", MAX_PRIORITY_SIZE, normalized);
             }
+            // Refresh the centralized 15-min activity TTL so the scheduler keeps this
+            // symbol in its active hydration set for the next cycle even after the
+            // 120s priority drain. This is the governance signal that says
+            // "someone is looking at this symbol — keep it warm."
+            try { policyService.markActive(normalized); } catch (Exception ignored) {}
         }
+    }
+
+    /**
+     * Cache-only quote read — returns whatever Redis has now (warm cache or
+     * last-close snapshot), or null if neither exists. NEVER triggers a synchronous
+     * external fetch.
+     *
+     * <p>Used by AI precompute and other background jobs to guarantee they do not
+     * burn provider quota chasing a quote. Callers that need on-demand live data
+     * for a user-blocking request must keep using {@link #getLatestQuote(String)}.
+     */
+    public Map<String, Object> getCachedQuoteSnapshot(String symbol) {
+        String normalized = normalizeSymbol(symbol);
+        if (normalized == null) return null;
+        try {
+            Object warm = redisTemplate.opsForValue().get(STOCK_KEY_PREFIX + normalized);
+            if (warm instanceof Map) return (Map<String, Object>) warm;
+            Object lastClose = redisTemplate.opsForValue().get(LAST_CLOSE_PREFIX + normalized);
+            if (lastClose instanceof Map) return (Map<String, Object>) lastClose;
+        } catch (Exception e) {
+            log.debug("getCachedQuoteSnapshot failed for {}: {}", normalized, e.getMessage());
+        }
+        return null;
     }
 
     /**
