@@ -96,10 +96,78 @@ export const API_ENDPOINTS = {
   }
 };
 
+// Production guard: if VITE_API_URL is missing in a prod build the app would
+// silently hit localhost and every request would fail with no usable error.
+// Surface it immediately and visibly instead of pretending things are fine.
+if (import.meta.env.PROD && !import.meta.env.VITE_API_URL) {
+  console.error('[FinPlay] VITE_API_URL is not set in this production build — set it in the Vercel dashboard under Settings → Environment Variables for all environments.');
+  if (typeof document !== 'undefined' && document.body) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fff;padding:14px 18px;font-family:system-ui,sans-serif;font-size:13px;text-align:center';
+    banner.textContent = 'Configuration error: VITE_API_URL is not set on this deployment.';
+    // Render after DOM is ready
+    document.addEventListener('DOMContentLoaded', () => document.body.prepend(banner));
+  }
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 45000,
+  // 15s, not 45s. Render free-tier cold-start observable median is ~10–20s; if
+  // a request takes longer than that, we want to fail fast and let the
+  // wake-detection retry path below handle the recovery — not block the UI
+  // for a minute and a half.
+  timeout: 15000,
 });
+
+// ─── Cold-start (Render wake-from-sleep) detection ──────────────────────────
+// Render free-tier sleeps after ~15min idle. The first request after sleep
+// stalls 10–45s while the JVM boots. Rather than blanking the UI for that
+// window, we expose an `isWaking` signal that components can subscribe to.
+// When liveness comes back up the signal flips back to false and pending
+// requests proceed.
+let __isWaking = false;
+const __wakeListeners = new Set();
+const setWaking = (v) => {
+  if (__isWaking === v) return;
+  __isWaking = v;
+  __wakeListeners.forEach((cb) => { try { cb(v); } catch (_) {} });
+};
+export const isBackendWaking = () => __isWaking;
+export const onBackendWaking = (cb) => {
+  __wakeListeners.add(cb);
+  return () => __wakeListeners.delete(cb);
+};
+
+const LIVENESS_URL = `${API_BASE_URL}/actuator/health/liveness`;
+const pingLiveness = async () => {
+  try {
+    // Bare fetch — bypasses axios, dedupe, JWT, and our own timeout/retry
+    // logic so a wake-check never recursively triggers another wake-check.
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch(LIVENESS_URL, { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(t);
+    return r.ok;
+  } catch (_) {
+    return false;
+  }
+};
+
+// Wait up to ~45s for the backend to come back, polling every 3s.
+// Returns true if the backend responded, false if we gave up.
+const waitForWake = async () => {
+  setWaking(true);
+  try {
+    for (let i = 0; i < 15; i++) {
+      const up = await pingLiveness();
+      if (up) return true;
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    return false;
+  } finally {
+    setWaking(false);
+  }
+};
 
 // ─── Inflight GET deduper ───────────────────────────────────────────────────
 // Multiple widgets mounting at once frequently fire identical GETs (e.g. three
@@ -153,28 +221,49 @@ api.defaults.adapter = async (config) => {
   return p;
 };
 
-// Interceptor for JWT
+// Request-id generator (tiny, dependency-free). Lets us correlate a frontend
+// network error with a backend log entry — the backend already has a
+// `[rid=%X{rid:-}]` slot in its logging pattern; the matching MDC filter is
+// added in this same pass.
+const newRequestId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+  }
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
+};
+
+// Interceptor for JWT + request-id
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  if (!config.headers['X-Request-Id']) {
+    config.headers['X-Request-Id'] = newRequestId();
+  }
   return config;
 });
 
-// Interceptor for Expiration/Auth Errors + transient retry
+// Interceptor for Expiration/Auth Errors + cold-start wake retry
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const config = error.config;
 
-    // Retry once on network/timeout failures (covers Render cold-start hangs)
+    // Transient = no HTTP response at all (network/timeout/CORS-with-no-body)
     const isTransient = !error.response &&
-      (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || error.message === 'Network Error');
+      (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || error.message === 'Network Error' || error.message?.includes('timeout'));
 
-    if (isTransient && !config._retried) {
+    if (isTransient && config && !config._retried) {
       config._retried = true;
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Before blindly re-firing, find out whether the backend is alive. If
+      // it's not, this is a Render cold-start — wait for wake (with a visible
+      // signal so the UI can show "Waking server…") then refire once.
+      const alive = await pingLiveness();
+      if (!alive) {
+        const woke = await waitForWake();
+        if (!woke) return Promise.reject(error); // Genuinely down — surface it.
+      }
       return api(config);
     }
 
@@ -182,7 +271,16 @@ api.interceptors.response.use(
       const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/register';
       if (!isAuthPage) {
         localStorage.removeItem('token');
-        window.location.href = '/login';
+        localStorage.removeItem('finplay_user');
+        // Soft redirect: brief delay so any in-flight UI can settle, and so
+        // we don't drop state on transient 401s caused by a quick clock skew.
+        // Avoid re-triggering on multiple parallel 401s with a single guard.
+        if (!window.__finplay_redirecting) {
+          window.__finplay_redirecting = true;
+          setTimeout(() => {
+            window.location.href = '/login?reason=expired';
+          }, 350);
+        }
       }
     }
     return Promise.reject(error);

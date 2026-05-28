@@ -35,6 +35,7 @@ const Vault = lazy(() => import('./pages/Vault'));
 const SimpleDashboard = lazy(() => import('./pages/SimpleDashboard'));
 
 import Layout from './components/Layout';
+import WakingBanner from './components/WakingBanner';
 import { StockPanelProvider } from './context/StockPanelContext';
 import { TradingProvider } from './context/TradingContext';
 import { MarketProvider } from './context/MarketContext';
@@ -142,6 +143,7 @@ export default function App() {
       <MarketProvider>
         <TradingProvider>
           <StockPanelProvider>
+            <WakingBanner />
             <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               {/*
                 Each lazy page is wrapped in its OWN <Suspense> INSIDE <Layout>.

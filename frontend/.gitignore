@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Env files — only `.env.example` should be committed. Local-only values go in
+# `.env.local`; per-environment values go in the Vercel/Render dashboards.
+.env
+.env.local
+.env.production
+.env.development
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

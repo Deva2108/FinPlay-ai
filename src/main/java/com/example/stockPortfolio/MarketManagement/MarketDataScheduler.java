@@ -50,6 +50,37 @@ public class MarketDataScheduler {
     private static final int CHART_UPDATE_FREQUENCY = 5;
     private static final int BATCH_SIZE = 12;
 
+    // Instance ID for scheduler lock ownership. Generated once per JVM so log
+    // messages can identify which instance held a contested lock.
+    private static final String INSTANCE_ID = java.util.UUID.randomUUID().toString().substring(0, 8);
+
+    /**
+     * Distributed scheduler lock via Redis SET NX EX. If two backend instances
+     * ever run simultaneously (rolling restart, manual scale-out), only one
+     * fires each scheduled job per cycle. Lock TTL is conservative — long
+     * enough to outlast the slowest expected run, short enough to recover
+     * automatically if a holder crashes mid-cycle.
+     *
+     * Returns true if this instance acquired the lock and should proceed.
+     * Returns true (with a debug log) if Redis is unavailable — schedulers
+     * still need to run on standalone deployments without distributed Redis.
+     */
+    private boolean acquireSchedulerLock(String name) {
+        try {
+            String key = "scheduler:lock:" + name;
+            Boolean ok = redisTemplate.opsForValue().setIfAbsent(
+                    key, INSTANCE_ID, java.time.Duration.ofMinutes(2));
+            if (Boolean.TRUE.equals(ok)) return true;
+            log.debug("Scheduler '{}' skipped — lock held by another instance.", name);
+            return false;
+        } catch (Exception e) {
+            // Fail open: if Redis is down, we don't want to silently stop the
+            // scheduler. Better to risk double-fire than no-fire.
+            log.debug("Scheduler lock check failed for '{}'; running anyway. ({})", name, e.getMessage());
+            return true;
+        }
+    }
+
     // TwelveData free tier: 8 credits/min, 1 credit per symbol even in batch calls.
     // We utilize the full 8 credits/min headroom for high-priority user needs.
     private static final int TWELVEDATA_CYCLE_LIMIT = 8;
@@ -101,8 +132,9 @@ public class MarketDataScheduler {
         this.aiPrecomputationExecutor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
-    @Scheduled(fixedRate = 60000, initialDelay = 120000)
+    @Scheduled(fixedRateString = "${finplay.scheduler.afterhours-rate-ms:60000}", initialDelay = 120000)
     public void afterHoursHydration() {
+        if (!acquireSchedulerLock("afterHoursHydration")) return;
         boolean indiaClosed = !marketStatusService.isIndianMarketOpen();
         boolean usClosed = !marketStatusService.isUsMarketOpen();
 
@@ -165,8 +197,9 @@ public class MarketDataScheduler {
         }
     }
 
-    @Scheduled(fixedRate = 60000, initialDelay = 45000)
+    @Scheduled(fixedRateString = "${finplay.scheduler.movers-rate-ms:60000}", initialDelay = 45000)
     public void precomputeTopMovers() {
+        if (!acquireSchedulerLock("precomputeTopMovers")) return;
         log.debug("Starting Top Movers precomputation...");
         try {
             List<Map<String, Object>> allData = marketAnalysisService.getMarketData();
@@ -242,8 +275,9 @@ public class MarketDataScheduler {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.example.stockPortfolio.ContentManagement.ContentService contentService;
 
-    @Scheduled(fixedRate = 1800000, initialDelay = 60000) // first run 60 s after startup
+    @Scheduled(fixedRateString = "${finplay.scheduler.ai-rate-ms:1800000}", initialDelay = 60000) // first run 60 s after startup
     public void precomputeAiInsights() {
+        if (!acquireSchedulerLock("precomputeAiInsights")) return;
         log.info("Starting AI Insight precomputation cycle...");
         for (String marketType : List.of("INDIA", "US")) {
             aiPrecomputationExecutor.submit(() -> {
@@ -287,8 +321,9 @@ public class MarketDataScheduler {
         }
     }
 
-    @Scheduled(fixedRate = 60000, initialDelay = 30000)
+    @Scheduled(fixedRateString = "${finplay.scheduler.hydration-rate-ms:60000}", initialDelay = 30000)
     public void hydrateMarketMirror() {
+        if (!acquireSchedulerLock("hydrateMarketMirror")) return;
         // ── Governance gate 1: provider outage state ─────────────────────────
         // If TwelveData was 429'd or hard-failed in the last 15 min, skip the
         // entire cycle. The cooldown is set inside ExternalMarketDataGateway

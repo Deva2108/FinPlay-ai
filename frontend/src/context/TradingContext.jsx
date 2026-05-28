@@ -44,8 +44,12 @@ export function TradingProvider({ children }) {
 
   const refreshData = useCallback(async () => {
     const token = localStorage.getItem('token');
-    const isFirstTime = !localStorage.getItem('finplay_arena_done');
-    if (!token || isFirstTime) {
+    // No token = nothing to load. The onboarding flag is checked at the route
+    // level (App.tsx) for redirects; it should NOT also gate hydration here,
+    // because a returning user in a fresh browser (incognito / cleared cookies
+    // / different device) has the JWT but no localStorage flag — gating
+    // hydration on that left them staring at an empty Dashboard with no error.
+    if (!token) {
       setLoading(false);
       return;
     }
