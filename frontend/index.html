@@ -5,6 +5,42 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FinPlay</title>
+    <!--
+      ES2022 runtime polyfills — INLINED so they execute BEFORE the module script
+      (and before any preloaded module chunk) regardless of bundler behaviour.
+
+      Why inline-in-HTML instead of relying solely on `import './polyfills'` in main.tsx:
+        1. <script type="module"> is deferred; this <script> is parser-blocking and runs first.
+        2. Cannot be tree-shaken or reordered by Rollup/Vite optimizations.
+        3. Travels atomically with index.html — every deploy ships it, every cache-bust
+           that touches the HTML carries it. Eliminates "stale chunk preserved across
+           deploys" failure modes entirely.
+        4. Independent of `<link rel="modulepreload">` parse-order races for split chunks.
+
+      Patches Array.prototype.at and String.prototype.at if missing.
+      Vanilla ES5 — works in Safari 12+, Chrome 49+, all Android WebView builds.
+    -->
+    <script>
+      (function () {
+        function atPolyfill(index) {
+          var len = this.length;
+          var k = Math.trunc(index) || 0;
+          var i = k < 0 ? len + k : k;
+          if (i < 0 || i >= len) return undefined;
+          return this[i];
+        }
+        if (typeof Array.prototype.at !== 'function') {
+          Object.defineProperty(Array.prototype, 'at', {
+            value: atPolyfill, writable: true, enumerable: false, configurable: true
+          });
+        }
+        if (typeof String.prototype.at !== 'function') {
+          Object.defineProperty(String.prototype, 'at', {
+            value: atPolyfill, writable: true, enumerable: false, configurable: true
+          });
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
