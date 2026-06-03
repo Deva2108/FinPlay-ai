@@ -27,12 +27,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Slice-level test ensuring controller-side @Valid produces a clean 400 for the
  * exploit cases we patched in Phase 2 (C1 negative qty, C3 zero qty).
  */
+// @ImportAutoConfiguration(exclude = SecurityAutoConfiguration.class) was removed.
+// That annotation, when used without an explicit `classes` attribute on a @WebMvcTest
+// slice, caused Spring Boot to pull in the *full* auto-configuration set (minus the
+// single exclusion), including JPA. @WebMvcTest normally excludes JPA — the extra
+// annotation was defeating that exclusion, producing:
+//   "No bean named 'entityManagerFactory' available"
+//
+// Security is handled via @WithMockUser (already on each test method) which sets up
+// a SecurityContext without needing to disable the whole autoconfiguration.
+// The excludeFilters on @WebMvcTest keeps JwtRequestFilter out of the slice.
 @WebMvcTest(controllers = PaperTradingController.class,
         excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(
                 type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,
                 classes = JwtRequestFilter.class))
-@org.springframework.boot.autoconfigure.ImportAutoConfiguration(
-        exclude = org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration.class)
 class PaperTradingControllerValidationTest {
 
     @Autowired private MockMvc mvc;

@@ -2,7 +2,6 @@ package com.example.stockPortfolio.AlertManagement;
 
 import com.example.stockPortfolio.HoldingsManagement.ApiResponse;
 import com.example.stockPortfolio.MarketManagement.MarketGateway;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -12,14 +11,26 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 // Removed @Lazy(false) to prevent blocking startup.
+// Constructor manually written (not @RequiredArgsConstructor) so we can
+// @Lazy-inject the repos + gateway. Without @Lazy here, AlertService and the
+// scheduling infra eagerly pulled JPA repos at context refresh, which in turn
+// pulled the EntityManagerFactory back onto the critical path — defeating the
+// `bootstrap-mode=deferred` setting.
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class AlertService {
 
     private final AlertRepo alertRepo;
     private final AlertHistoryRepo historyRepo;
     private final MarketGateway marketGateway;
+
+    public AlertService(@Lazy AlertRepo alertRepo,
+                        @Lazy AlertHistoryRepo historyRepo,
+                        @Lazy MarketGateway marketGateway) {
+        this.alertRepo = alertRepo;
+        this.historyRepo = historyRepo;
+        this.marketGateway = marketGateway;
+    }
 
     private static final double RANGE_BUFFER = 0.01; // 1% buffer
     private static final long COOLDOWN_MINUTES = 60; // Don't re-trigger same alert for 1 hour
@@ -38,7 +49,11 @@ public class AlertService {
      * READ ONLY FROM MIRROR.
      * This engine no longer triggers external API calls.
      */
-    @Scheduled(fixedRate = 180000) // 3 mins
+    // initialDelay = 90 s so the FIRST tick lands well after Tomcat has bound
+    // the port and the JPA EMF has finished initializing on its deferred thread.
+    // Without an initialDelay, this can fire during the last seconds of context
+    // refresh and yank the alert repos onto the boot critical path.
+    @Scheduled(fixedRate = 180000, initialDelay = 90000) // 3 mins, first run +90 s
     public void runSmartAlertEngine() {
         List<String> symbols = alertRepo.findAllDistinctSymbols();
         if (symbols.isEmpty()) return;

@@ -61,9 +61,18 @@ public class ExternalMarketDataGateway {
 
     // In-flight deduplication: ensures concurrent cold requests for the same symbol
     // share one CompletableFuture rather than fanning out to N simultaneous API calls.
-    // The future is removed from the map when it completes (success or failure).
+    // The future is removed from the map ONLY by its own whenComplete callback, so the
+    // map has exactly one cleanup owner and no caller-side removal can race it.
     private final ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> inFlightFetches =
             new ConcurrentHashMap<>();
+
+    // Stale-future protection: a hard upper bound on how long an in-flight entry may
+    // live. If the underlying fetch stalls (e.g. a RestTemplate socket hang that never
+    // returns), orTimeout completes the future exceptionally at this bound, which fires
+    // whenComplete and purges the map entry. Guarantees a symbol can never be permanently
+    // "poisoned" by a stuck future. Must be > the per-caller get() timeout (5s) so that
+    // slow-but-legitimate fetches still complete and serve late-arriving joiners.
+    private static final long IN_FLIGHT_HARD_TIMEOUT_SECONDS = 10L;
 
     // Provider-specific symbol overrides.
     //
@@ -139,18 +148,27 @@ public class ExternalMarketDataGateway {
         }
 
         // 1. IN-FLIGHT DEDUP: join an existing in-progress fetch or start a new one.
+        //    orTimeout caps the future's lifetime so a hung fetch cannot keep the map
+        //    entry alive indefinitely; whenComplete is the single cleanup owner and
+        //    fires on success, failure, OR the orTimeout backstop.
         CompletableFuture<Map<String, Object>> future = inFlightFetches.computeIfAbsent(
             normalized,
             sym -> CompletableFuture
                 .supplyAsync(() -> doFetchWithFallbacks(sym))
+                .orTimeout(IN_FLIGHT_HARD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .whenComplete((r, ex) -> inFlightFetches.remove(sym))
         );
 
         try {
             return future.get(5, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            log.warn("In-flight fetch timed out for {}", normalized);
-            inFlightFetches.remove(normalized);
+            // This caller waited 5s and gave up — but DO NOT remove the map entry here.
+            // The shared future keeps running under its orTimeout backstop, so late-arriving
+            // callers JOIN it instead of fanning out into duplicate API calls. Removing the
+            // entry here was the lockup bug: it let N concurrent callers each spawn a fresh
+            // fetch and discarded the in-progress result. Cleanup is owned solely by
+            // whenComplete (success, failure, or the orTimeout backstop).
+            log.warn("In-flight fetch timed out for {} (caller gave up; shared future continues)", normalized);
             return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -272,8 +290,10 @@ public class ExternalMarketDataGateway {
 
         try {
             Map<String, Object> quoteResponse = restTemplate.getForObject(quoteUrl, Map.class);
-            // Reject null, error envelopes ({"code":429,...}), and responses missing the price field.
-            if (quoteResponse == null || quoteResponse.containsKey("code") || !quoteResponse.containsKey("price")) {
+            // Reject null, error envelopes ({"code":429,...}), and responses missing the 'close' field.
+            // TwelveData /quote uses "close" for the current price, not "price".
+            // The separate /price endpoint uses "price"; /quote does not — confirmed via OpenAPI spec.
+            if (quoteResponse == null || quoteResponse.containsKey("code") || !quoteResponse.containsKey("close")) {
                 if (quoteResponse != null && quoteResponse.containsKey("code")) {
                     Object codeVal = quoteResponse.get("code");
                     log.warn("TwelveData error for {}: code={} msg={}",
@@ -286,11 +306,14 @@ public class ExternalMarketDataGateway {
                         markFailureCooldown(normalized);
                         policyService.markProviderDisabled(MarketDataPolicyService.PROVIDER_TWELVEDATA);
                     }
+                } else if (quoteResponse != null) {
+                    log.warn("TwelveData /quote for {}: 'close' field absent. Keys present: {}",
+                            twelveSymbol, quoteResponse.keySet());
                 }
                 return null;
             }
 
-            double price = safeParseDouble(quoteResponse.get("price"));
+            double price = safeParseDouble(quoteResponse.get("close"));
             if (price <= 0) {
                 log.warn("TwelveData returned non-positive price for {}. Skipping.", twelveSymbol);
                 return null;
@@ -710,10 +733,16 @@ public class ExternalMarketDataGateway {
                 if (response == null) continue;
 
                 // Handle global error envelope for the whole batch
-                if (response.containsKey("code") && !response.containsKey("price")) {
+                if (response.containsKey("code") && !response.containsKey("close")) {
                     Object codeVal = response.get("code");
                     log.warn("TwelveData batch global error: code={} msg={}", codeVal, response.get("message"));
                     if ("429".equals(String.valueOf(codeVal))) {
+                        // Provider-wide outage broadcast (was MISSING on the batch path).
+                        // A 429 here is account-wide, so disable TwelveData for ALL symbols
+                        // for the cooldown window — mirroring the single-quote path. Without
+                        // this, hydrateMarketMirror re-fired the batch every cycle and kept
+                        // re-triggering 429s: the cascading-outage bug.
+                        policyService.markProviderDisabled(MarketDataPolicyService.PROVIDER_TWELVEDATA);
                         for (String tSym : chunk) {
                             String normalized = reverseMap.get(tSym);
                             if (normalized != null) markFailureCooldown(normalized);
@@ -739,6 +768,10 @@ public class ExternalMarketDataGateway {
             } catch (Exception e) {
                 log.warn("Twelve Data Batch failed for chunk {}: {}", batchString, e.getMessage());
                 if (e.getMessage() != null && e.getMessage().contains("429")) {
+                    // Provider-wide outage broadcast (was MISSING on the batch path).
+                    // Mirror the single-quote path so an HTTP-level 429 also disables
+                    // TwelveData globally, stopping the every-cycle retry storm.
+                    policyService.markProviderDisabled(MarketDataPolicyService.PROVIDER_TWELVEDATA);
                     for (String tSym : chunk) {
                         String normalized = reverseMap.get(tSym);
                         if (normalized != null) markFailureCooldown(normalized);
@@ -750,7 +783,12 @@ public class ExternalMarketDataGateway {
     }
 
     private void processSingleTwelveQuote(Map<String, Object> data, Map<String, String> reverseMap, Map<String, Map<String, Object>> results) {
-        if (data == null || !data.containsKey("symbol") || !data.containsKey("price")) return;
+        if (data == null || !data.containsKey("symbol") || !data.containsKey("close")) {
+            if (data != null && !data.containsKey("code")) {
+                log.warn("TwelveData batch sub-map missing 'symbol' or 'close'. Keys present: {}", data.keySet());
+            }
+            return;
+        }
 
         // TwelveData returns error envelopes as HTTP 200 with a "code" field
         // (e.g. {"code": 429, "message": "You have run out of API credits..."}).
@@ -776,7 +814,7 @@ public class ExternalMarketDataGateway {
         String normalized = reverseMap.get(tSym);
         if (normalized == null) return;
 
-        double price = safeParseDouble(data.get("price"));
+        double price = safeParseDouble(data.get("close"));
         // A zero or negative price means either parse failure or a TwelveData placeholder.
         // Writing price=0 to Redis silently corrupts portfolio valuations.
         if (price <= 0) {

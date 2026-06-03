@@ -56,7 +56,11 @@ public class SecurityConfig {
                         .requestMatchers("/admin/**", "/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/tutorial/insight").authenticated()
                         .requestMatchers("/api/content/**").authenticated()
-                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
+                        // Root-level aliases for Render/Vercel/UptimeRobot probes.
+                        // Mapped from the actuator probes via
+                        // management.endpoint.health.probes.add-additional-paths=true.
+                        .requestMatchers("/livez", "/readyz").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/webjars/**", "/swagger-resources/**").permitAll()
                         .anyRequest().authenticated()
                 )

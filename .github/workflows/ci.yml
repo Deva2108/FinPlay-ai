@@ -1,0 +1,113 @@
+# FinPlay CI — Stage 1 Quality Gate
+#
+# Runs on every push and every pull_request to main.
+# Blocks merge on:
+#   - backend compile failure
+#   - any backend test failure
+#   - frontend build failure
+#
+# Does NOT block on:
+#   - code coverage thresholds
+#   - static analysis / Sonar smells
+#   - deployment (Render is paused; deploy hook is wired separately)
+#
+# Environment notes:
+#   JWT_SECRET  — must be valid Base64, decoded length >= 32 bytes (JwtUtils validates
+#                 at startup). The value below is a CI-only test secret and is NOT used
+#                 in any real environment. Do not use it as a production secret.
+#   REDIS_URL   — VaultIntegrationTest uses @SpringBootTest (h2 profile). It mocks
+#                 RedisConnectionFactory + ReactiveRedisConnectionFactory so no real
+#                 Redis server is needed; the URL only needs to pass property-source
+#                 placeholder resolution (any valid redis:// URI works).
+
+name: CI
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # JOB 1 — Backend (Java 21 / Maven)
+  # ──────────────────────────────────────────────────────────────────────────
+  backend:
+    name: Backend — compile + test
+    runs-on: ubuntu-latest
+
+    env:
+      # CI-only test secret — valid Base64, decodes to 59 bytes (>= 32 required by
+      # JwtUtils.validateSecret). NOT a real production credential.
+      JWT_SECRET: "ZmlucGxheS1jaS1vbmx5LXRlc3Qtc2VjcmV0LW5vdC1yZWFsLWRvLW5vdC11c2UtaW4tcHJvZC1lbnY="
+      # Placeholder resolution only — no real Redis is connected.
+      # VaultIntegrationTest mocks both RedisConnectionFactory and
+      # ReactiveRedisConnectionFactory so the context loads without a server.
+      REDIS_URL: "redis://localhost:6379"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # Compile gate — catches syntax errors and missing imports before running
+      # the full test suite. Fast (~30s) and gives a clear signal when a push
+      # breaks the build without waiting for test execution.
+      - name: Compile
+        run: ./mvnw -B -DskipTests compile
+
+      # Test gate — blocks on any test failure or error.
+      # -fae (fail-at-end): runs ALL tests before reporting, so you see the full
+      # picture rather than stopping at the first broken class.
+      - name: Test
+        run: ./mvnw -B -fae test
+
+      # Retain Surefire XML reports so the GitHub test summary can display
+      # per-test results inline on the Actions run page.
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # JOB 2 — Frontend (Node 20 / Vite)
+  # ──────────────────────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend — install + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # ci (not install) — uses package-lock.json exactly; fails on lockfile drift.
+      # --no-audit --no-fund suppress network calls that add latency without value.
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Build gate — catches broken imports, TypeScript errors (via vite-plugin-checker),
+      # and Vite config issues. VITE_API_URL is a build-time env var; the placeholder
+      # below is intentional — the build validates the module graph, not live API calls.
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_URL: "http://localhost:8080"

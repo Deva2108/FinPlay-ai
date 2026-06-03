@@ -28,6 +28,10 @@ class PortfolioServiceResetTest {
 
     @Mock private PortfolioRepo portfolioRepo;
     @Mock private HoldingRepo holdingRepo;
+    // PortfolioService gained a TransactionRepo constructor param after this test
+    // was written. @InjectMocks uses constructor injection; without this mock the
+    // field is null and resetPortfolio() NPEs on the transaction-delete call.
+    @Mock private com.example.stockPortfolio.HoldingsManagement.TransactionRepo transactionRepo;
 
     @InjectMocks private PortfolioService service;
 

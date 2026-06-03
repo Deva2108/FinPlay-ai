@@ -10,7 +10,9 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -23,13 +25,6 @@ public class StockUniverseInitializer {
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
         CompletableFuture.runAsync(() -> {
-            try {
-                // Delay seeding by 20s to allow Render health check to pass first
-                Thread.sleep(20000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
             log.info("[warmup] Async stock universe seeding started...");
 
             List<StockUniverse> stocks = List.of(
@@ -58,8 +53,15 @@ public class StockUniverseInitializer {
                 StockUniverse.builder().symbol("LT.NS").name("Larsen & Toubro Limited").sector("Construction").market("INDIA").currency("INR").marketCap("Large Cap").build()
             );
 
+            // One read instead of 20: load existing symbols once, then insert only
+            // the missing ones. Identical insert-if-missing semantics to the previous
+            // per-symbol findBySymbol() guard — no symbol is skipped.
+            Set<String> existingSymbols = stockUniverseRepo.findAll().stream()
+                    .map(StockUniverse::getSymbol)
+                    .collect(Collectors.toSet());
+
             for (StockUniverse stock : stocks) {
-                if (stockUniverseRepo.findBySymbol(stock.getSymbol()).isEmpty()) {
+                if (!existingSymbols.contains(stock.getSymbol())) {
                     stockUniverseRepo.save(stock);
                     log.info("[warmup] Seeded stock: {}", stock.getSymbol());
                 }

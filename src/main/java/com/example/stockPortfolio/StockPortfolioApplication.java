@@ -3,17 +3,18 @@ package com.example.stockPortfolio;
 import io.github.cdimascio.dotenv.Dotenv;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.cache.annotation.EnableCaching;
-import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.boot.context.metrics.buffering.BufferingApplicationStartup;
 import lombok.extern.slf4j.Slf4j;
 
+// @EnableJpaRepositories was removed: it is redundant with Spring Boot's
+// JpaRepositoriesAutoConfiguration, which scans the same base package
+// automatically. The explicit annotation had no effect in production but
+// caused @WebMvcTest slices to attempt JPA bootstrap (requiring
+// entityManagerFactory) which the web-layer-only context does not provide,
+// crashing all @WebMvcTest tests with "No bean named 'entityManagerFactory'".
 @SpringBootApplication(exclude = {
     org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration.class
 })
-@EnableScheduling
-@EnableCaching
-@EnableJpaRepositories(basePackages = "com.example.stockPortfolio")
 @Slf4j
 public class StockPortfolioApplication {
 
@@ -23,11 +24,16 @@ public class StockPortfolioApplication {
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.core.env.Environment env;
 
+
     public static void main(String[] args) {
 		Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
 		dotenv.entries().forEach(entry -> System.setProperty(entry.getKey(), entry.getValue()));
 
-		SpringApplication.run(StockPortfolioApplication.class, args);
+		SpringApplication app = new SpringApplication(StockPortfolioApplication.class);
+		// Measurement only: buffers per-step startup timings for GET /actuator/startup.
+		// Observes the existing boot sequence; does not change bean order or set.
+		app.setApplicationStartup(new BufferingApplicationStartup(2048));
+		app.run(args);
 	}
 
     @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)

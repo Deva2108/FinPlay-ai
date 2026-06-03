@@ -23,6 +23,12 @@ class PortfolioServiceTest {
     @Mock
     private com.example.stockPortfolio.HoldingsManagement.HoldingRepo holdingRepo;
 
+    // PortfolioService gained a TransactionRepo constructor param after this test
+    // was written. Without this mock, openMocks() cannot satisfy the constructor
+    // and InjectMocks silently injects null, causing NPEs downstream.
+    @Mock
+    private com.example.stockPortfolio.HoldingsManagement.TransactionRepo transactionRepo;
+
     @InjectMocks
     private PortfolioService portfolioService;
 
@@ -57,18 +63,29 @@ class PortfolioServiceTest {
         Long portfolioId = 10L;
         Long userId = 1L;
         BigDecimal amount = new BigDecimal("500.00");
-        
-        Portfolio portfolio = new Portfolio();
-        portfolio.setPortfolioId(portfolioId);
-        portfolio.setBalance(new BigDecimal("1000.00"));
 
-        when(portfolioRepo.findByPortfolioIdAndUser_UserId(portfolioId, userId)).thenReturn(Optional.of(portfolio));
-        when(portfolioRepo.save(any(Portfolio.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        // updateBalance() now uses an atomic SQL UPDATE (updateBalanceAtomic) rather
+        // than a load-modify-save cycle. The old mock for findByPortfolioIdAndUser_UserId
+        // was stale — updateBalanceAtomic() returned 0 (Mockito default), which caused
+        // the service to throw ResourceNotFoundException("Portfolio not found: 10").
+        //
+        // New contract:
+        //   1. updateBalanceAtomic returns 1  → update succeeded in DB
+        //   2. getPortfolioById reads back via readByPortfolioIdAndUser_UserId (no @Lock)
+        //      → returns the post-update state we synthesise here.
+        Portfolio updatedPortfolio = new Portfolio();
+        updatedPortfolio.setPortfolioId(portfolioId);
+        updatedPortfolio.setBalance(new BigDecimal("1500.00"));
+
+        when(portfolioRepo.updateBalanceAtomic(portfolioId, amount, userId)).thenReturn(1);
+        when(portfolioRepo.readByPortfolioIdAndUser_UserId(portfolioId, userId))
+                .thenReturn(Optional.of(updatedPortfolio));
 
         PortfolioDTO result = portfolioService.updateBalance(portfolioId, amount, userId);
 
-        assertEquals(new BigDecimal("1500.00"), portfolio.getBalance());
+        // Assert on the returned DTO, not the in-memory entity; the atomic update
+        // modifies the DB row, not the Java object.
         assertEquals(new BigDecimal("1500.00"), result.getBalance());
-        verify(portfolioRepo, times(1)).save(portfolio);
+        verify(portfolioRepo, times(1)).updateBalanceAtomic(portfolioId, amount, userId);
     }
 }
