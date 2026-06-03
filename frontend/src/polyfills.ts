@@ -58,3 +58,22 @@ if (typeof (String.prototype as any).at !== 'function') {
     configurable: true,
   });
 }
+
+// TypedArray.prototype.at — the gap that crashed registration.
+// All 11 TypedArray constructors (Int8Array, Uint8Array, Float64Array, …) share
+// one hidden intrinsic prototype, %TypedArray%.prototype, reachable as the
+// prototype of any concrete TypedArray's prototype. Patching that single object
+// covers every TypedArray variant at once. TypedArrays already expose `length`
+// and integer-indexed access, so the shared _atPolyfill applies unchanged.
+// Guarded so it is a no-op in hosts lacking TypedArrays or already shipping .at().
+if (typeof Int8Array === 'function') {
+  const TypedArrayProto = Object.getPrototypeOf(Int8Array.prototype);
+  if (TypedArrayProto && typeof (TypedArrayProto as any).at !== 'function') {
+    Object.defineProperty(TypedArrayProto, 'at', {
+      value: _atPolyfill,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+}
