@@ -49,3 +49,4 @@ npm run dev
 - **AI Mentor System:** Contextual learning integrated into the trading flow.
 - **Hybrid API System:** Combines multiple market data sources for reliability.
 - **Production Ready:** Healthchecks, timeouts, and proper exception handling.
+// ci test
