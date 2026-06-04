@@ -26,7 +26,12 @@ export default function Login() {
       });
 
       if (data?.success) {
-        await refreshData();
+        // Navigate immediately — do NOT block the post-login transition on the
+        // portfolio sync. A slow/cold sync used to make a successful login appear
+        // frozen. The dashboard renders its shell instantly and fills in as this
+        // background refresh resolves (refreshData has its own internal error
+        // handling, so it never rejects here).
+        refreshData();
         navigate('/dashboard');
       } else {
         throw new Error('Authentication failed');

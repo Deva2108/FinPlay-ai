@@ -36,6 +36,7 @@ public class MarketDataScheduler {
     private final StockUniverseRepo stockUniverseRepo;
     private final org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate;
     private final MarketAnalysisService marketAnalysisService;
+    private final YahooFinanceService yahooFinanceService;
     // Centralized governance. Field-injected (not constructor) so the existing
     // long constructor stays stable; @Lazy lets context refresh complete before
     // any cross-bean wiring is exercised.
@@ -59,6 +60,12 @@ public class MarketDataScheduler {
             List.of("AAPL", "RELIANCE.NS", "MSFT", "TCS.NS", "HDFCBANK.NS");
     private final java.util.concurrent.atomic.AtomicBoolean bootstrapHydrated =
             new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    // Real-history backfill: how many symbols to pull per cycle, and which ones
+    // we've already pulled this JVM run (one-time per symbol — past daily history
+    // doesn't change; today's close is handled by updateMirror).
+    private static final int BACKFILL_PER_CYCLE = 3;
+    private final java.util.Set<String> historyBackfilled = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     // Instance ID for scheduler lock ownership. Generated once per JVM so log
     // messages can identify which instance held a contested lock.
@@ -116,7 +123,8 @@ public class MarketDataScheduler {
                                @Lazy StockUniverseRepo stockUniverseRepo,
                                @Lazy org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate,
                                @Lazy MarketAnalysisService marketAnalysisService,
-                               @Lazy com.example.stockPortfolio.PortfolioManagement.PortfolioHistoryService portfolioHistoryService) {
+                               @Lazy com.example.stockPortfolio.PortfolioManagement.PortfolioHistoryService portfolioHistoryService,
+                               @Lazy YahooFinanceService yahooFinanceService) {
         this.finnhubService = finnhubService;
         this.newsApiService = newsApiService;
         this.marketGateway = marketGateway;
@@ -133,7 +141,8 @@ public class MarketDataScheduler {
         this.redisTemplate = redisTemplate;
         this.marketAnalysisService = marketAnalysisService;
         this.portfolioHistoryService = portfolioHistoryService;
-        
+        this.yahooFinanceService = yahooFinanceService;
+
         // Java 21 virtual threads: each AI precomputation task gets its own lightweight
         // carrier thread. No fixed pool size needed — VTs block cheaply on the Groq HTTP
         // call without pinning OS threads, and JVM garbage-collects them when done.
@@ -328,6 +337,48 @@ public class MarketDataScheduler {
                     log.error("Failed to precompute insight for {}: {}", idx.getSymbol(), e.getMessage());
                 }
             });
+        }
+    }
+
+    /**
+     * Background, paced backfill of REAL daily history (and deep financials) for the
+     * tracked universe, so charts have genuine depth for both US and Indian stocks.
+     * Runs entirely off the request path on the shared executor — chart requests keep
+     * reading stock_history from the DB, so the deployed app's latency is unaffected.
+     * Source: Yahoo public chart API (FREE, no key, no quota; US + .NS). One-time per
+     * symbol; gentle 800ms stagger keeps Yahoo happy from a shared cloud IP.
+     */
+    @Scheduled(fixedRateString = "${finplay.scheduler.backfill-rate-ms:120000}", initialDelay = 75000)
+    public void backfillRealHistory() {
+        if (!acquireSchedulerLock("backfillRealHistory")) return;
+
+        List<String> candidates = stockUniverseRepo.findAll().stream()
+                .map(StockUniverse::getSymbol)
+                .map(symbolNormalizer::normalize)
+                .filter(Objects::nonNull)
+                .filter(s -> !historyBackfilled.contains(s))
+                .limit(BACKFILL_PER_CYCLE)
+                .collect(Collectors.toList());
+        if (candidates.isEmpty()) return;
+
+        for (int i = 0; i < candidates.size(); i++) {
+            final String s = candidates.get(i);
+            historyBackfilled.add(s); // mark attempted so a bad symbol isn't retried forever
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<Map<String, Object>> candles = yahooFinanceService.fetchDailyHistory(s, "1Y");
+                    if (candles != null && !candles.isEmpty()) {
+                        int n = marketGateway.backfillDailyHistory(s, candles);
+                        if (n > 0) log.info("Backfilled {} real history rows for {} (Yahoo).", n, s);
+                    }
+                    // Deep financials — free via the configured Google Sheets proxy.
+                    // No-op (empty) when google.script.url is unset; harmless either way.
+                    Map<String, Object> fin = googleSheetsService.fetchFinancials(s);
+                    if (fin != null && !fin.isEmpty()) marketGateway.updateFinancialsMirror(s, fin);
+                } catch (Exception e) {
+                    log.warn("Real-history backfill failed for {}: {}", s, e.getMessage());
+                }
+            }, CompletableFuture.delayedExecutor(i * 800L, TimeUnit.MILLISECONDS, aiPrecomputationExecutor));
         }
     }
 

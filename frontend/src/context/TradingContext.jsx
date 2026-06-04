@@ -117,6 +117,17 @@ export function TradingProvider({ children }) {
     refreshData();
   }, [refreshData]);
 
+  // Hydration watchdog: never let the app sit behind a stuck `loading` flag if
+  // the initial sync stalls (cold backend, slow network, transient-retry/wake
+  // chain). Cap loading at 8s so consumers render a degraded-but-usable UI
+  // instead of a blank/frozen screen. The loggedOut guard is respected — a logout
+  // sets loading false, so this no-ops afterwards.
+  useEffect(() => {
+    if (!loading) return;
+    const t = setTimeout(() => setLoading(false), 8000);
+    return () => clearTimeout(t);
+  }, [loading]);
+
   const recordDecision = useCallback(async (action, stock, marketMode) => {
     const newDecision = {
       stock,

@@ -9,6 +9,16 @@
 // imports from here, so there is no import cycle.
 import { api, API_ENDPOINTS, readApiEnvelope, swrClear } from './api';
 
+// Per-request policy for the two non-idempotent auth POSTs.
+//   _noRetry  — a retry could create a DUPLICATE account or a second login
+//               round-trip, so these never auto-retry on a transient/timeout.
+//   _noDedupe — never coalesced with any in-flight request (POSTs aren't
+//               deduped anyway; set explicitly so intent is unambiguous).
+//   timeout   — 30s (not the global 15s) so a Render cold start completes within
+//               a SINGLE request, no retry needed. Market/sync keep the 15s
+//               default. Global wake support stays intact.
+const AUTH_REQUEST = { timeout: 30000, _noRetry: true, _noDedupe: true };
+
 // Persist the auth result (token + user) returned inside the API envelope.
 // Private to this module — only login/register use it.
 function persistAuth(result) {
@@ -19,7 +29,7 @@ function persistAuth(result) {
 }
 
 export const registerUser = async (data) => {
-  const response = await api.post(API_ENDPOINTS.AUTH.REGISTER, data);
+  const response = await api.post(API_ENDPOINTS.AUTH.REGISTER, data, AUTH_REQUEST);
   const result = readApiEnvelope(response);
   persistAuth(result);
   return result;
@@ -28,7 +38,7 @@ export const registerUser = async (data) => {
 export const loginUser = async (data) => {
   localStorage.removeItem('token');
   localStorage.removeItem('finplay_user');
-  const response = await api.post(API_ENDPOINTS.AUTH.LOGIN, data);
+  const response = await api.post(API_ENDPOINTS.AUTH.LOGIN, data, AUTH_REQUEST);
   const result = readApiEnvelope(response);
   persistAuth(result);
   return result;

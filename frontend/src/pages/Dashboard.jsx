@@ -33,7 +33,7 @@ import WatchlistWidget from '../components/Dashboard/WatchlistWidget';
 export default function Dashboard() {
   const { openStockPanel, recentlyViewed: allRecentlyViewed } = useStockPanel();
   const { marketMode, marketCode, setMarketMode } = useMarket();
-  const { balance, recordDecision, decisions: allDecisions, activePortfolioId, missedOpportunities: allMissed, loading: portfolioLoading } = useTrading();
+  const { balance, recordDecision, decisions: allDecisions, activePortfolioId, missedOpportunities: allMissed, loading: portfolioLoading, error: portfolioError } = useTrading();
 
   // indices + trending state moved into <IndicesWidget> and <MoversWidget>.
   // Dashboard only receives the derived breadth counts it needs for the header bar.
@@ -206,7 +206,16 @@ export default function Dashboard() {
     <MarketInsightPanel isOpen={!!marketInsightData} onClose={() => setMarketInsightData(null)} indexData={marketInsightData} onTryGame={handleTryGameFromIndex} />
     <div className={`transition-colors duration-500 min-h-full w-full pb-20 ${marketTone}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-8 space-y-8">
-        
+
+        {/* Degraded-state banner (CHANGE 4): if the portfolio sync failed, the
+            dashboard still renders — we just say data is limited and retrying,
+            instead of silently showing defaults or a blank screen. */}
+        {portfolioError && !portfolioLoading && (
+          <div className="bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-2xl px-5 py-3 text-xs font-bold">
+            Showing limited data — we couldn't fully sync your portfolio. Retrying in the background.
+          </div>
+        )}
+
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-slate-900/50 border border-white/5 backdrop-blur-xl rounded-2xl px-5 py-4 flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
           <div className="flex items-center gap-3 shrink-0">
             <div className={`w-2 h-2 rounded-full ${loadingPulse ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />

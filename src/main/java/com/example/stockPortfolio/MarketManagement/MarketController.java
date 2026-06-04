@@ -147,6 +147,7 @@ public class MarketController {
                             .name(name)
                             .sector(sector)
                             .market(market)
+                            .currency("INDIA".equals(market) ? "INR" : "USD") // required (NOT NULL) — omitting it silently failed every insert
                             .marketCap(marketCap)
                             .isIndex(false)
                             .build();
@@ -241,10 +242,16 @@ public class MarketController {
 
             // 3. Aggregate
             Map<String, Object> details = new HashMap<>();
+            // Surface financial fields (marketCap, peRatio, high52, low52, …) at the
+            // TOP level — the UI reads details.marketCap etc., not details.financials.x.
+            // putAll first so the explicit fields below always win over any sheet key.
+            if (financials != null && !financials.isEmpty()) details.putAll(financials);
             details.put("symbol", normalized);
             details.put("price", quote != null ? quote.get("price") : 0.0);
             details.put("change", quote != null ? quote.get("changesPercentage") : 0.0);
-            details.put("financials", financials);
+            // Currency so the detail page formats US tickers as $ instead of defaulting to ₹.
+            details.put("currency", symbolNormalizer.isIndian(normalized) ? "INR" : "USD");
+            details.put("financials", financials); // keep nested for backward compatibility
             
             // 4. Mentor Line (Fallback or precomputed)
             String mentorLine = marketGateway.getPrecomputedInsight("mentor", normalized);
@@ -430,12 +437,26 @@ public class MarketController {
                 .build());
     }
 
+    // Null-safe numeric coercion for quote maps. A mirror quote can occasionally
+    // arrive without a usable price/changesPercentage (cold entry, partial sync,
+    // index with no % change). Returning ZERO keeps gainers/losers/sector/indices
+    // honoring the SYNCING/empty fallback contract instead of NPE-ing the entire
+    // list into a 500 — mirrors the null-safe getDouble() already used for sorting.
+    private static java.math.BigDecimal toBig(Object v) {
+        if (v instanceof Number) return java.math.BigDecimal.valueOf(((Number) v).doubleValue());
+        if (v instanceof String) {
+            try { return new java.math.BigDecimal(((String) v).replace(",", "").trim()); }
+            catch (NumberFormatException ignore) { /* fall through to ZERO */ }
+        }
+        return java.math.BigDecimal.ZERO;
+    }
+
     private MarketDataDTO mapToMarketDataDTO(Map<String, Object> map) {
         String symbol = (String) map.get("symbol");
         return MarketDataDTO.builder()
                 .symbol(symbol)
-                .price(java.math.BigDecimal.valueOf(((Number) map.get("price")).doubleValue()))
-                .changesPercentage(java.math.BigDecimal.valueOf(((Number) map.get("changesPercentage")).doubleValue()))
+                .price(toBig(map.get("price")))
+                .changesPercentage(toBig(map.get("changesPercentage")))
                 .sector((String) map.get("sector"))
                 .marketCap((String) map.get("marketCap"))
                 .market(marketGateway.getSymbolNormalizer().isIndian(symbol) ? "IN" : "US")
@@ -446,8 +467,8 @@ public class MarketController {
         String symbol = (String) map.get("symbol");
         return StockQuoteDTO.builder()
                 .symbol(symbol)
-                .price(java.math.BigDecimal.valueOf(((Number) map.get("price")).doubleValue()))
-                .changesPercentage(java.math.BigDecimal.valueOf(((Number) map.get("changesPercentage")).doubleValue()))
+                .price(toBig(map.get("price")))
+                .changesPercentage(toBig(map.get("changesPercentage")))
                 .companyName((String) map.getOrDefault("companyName", ""))
                 .market(marketGateway.getSymbolNormalizer().isIndian(symbol) ? "IN" : "US")
                 .build();

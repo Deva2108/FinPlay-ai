@@ -275,7 +275,10 @@ api.interceptors.response.use(
     const isTransient = !error.response &&
       (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || error.message === 'Network Error' || error.message?.includes('timeout'));
 
-    if (isTransient && config && !config._retried) {
+    // Non-idempotent callers (auth POSTs) opt out via `_noRetry` so a timeout can
+    // never trigger a duplicate request (e.g. a second registration). The wake
+    // infrastructure below is otherwise unchanged for every other request.
+    if (isTransient && config && !config._retried && !config._noRetry) {
       // Clone the config for the retry and strip the abort primitives. The
       // original signal/cancelToken belong to the FIRST attempt — which has
       // already aborted (cold-start timeout). Reusing them makes the retry

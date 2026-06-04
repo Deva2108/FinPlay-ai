@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
 import { registerUser } from '../services/auth';
+import { useTradeActions } from '../context/TradingContext';
 import { Rocket } from 'lucide-react';
 
 export default function Register() {
@@ -10,7 +11,11 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Progressive request status so the button never looks frozen during a cold
+  // Render start-up: creating → waking → finishing.
+  const [status, setStatus] = useState('idle'); // idle | creating | waking | finishing
   const navigate = useNavigate();
+  const { refreshData } = useTradeActions();
 
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -23,14 +28,29 @@ export default function Register() {
 
     setLoading(true);
     setError(null);
+    setStatus('creating');
+    // A cold Render backend takes ~10–20s on the first hit. After 4s, surface a
+    // "waking server" state so the user sees progress instead of a frozen button.
+    // The single 30s-timeout, no-retry POST (auth.js) survives that window.
+    const wakeTimer = setTimeout(() => setStatus('waking'), 4000);
     try {
       const res = await registerUser({ name, email, password });
+      clearTimeout(wakeTimer);
       if (res?.success) {
+        setStatus('finishing');
+        // Hydrate the just-created portfolio in the background so activePortfolioId
+        // is set by the time the new user reaches the dashboard — otherwise their
+        // first trade fails with "Invalid trade". Mirrors the Login flow; not
+        // awaited (refreshData handles its own errors) so navigation stays instant.
+        refreshData();
         navigate('/onboarding');
       } else {
+        setStatus('idle');
         setError('Registration failed.');
       }
     } catch (err) {
+      clearTimeout(wakeTimer);
+      setStatus('idle');
       const message =
         err.response?.data?.message ||
         err.response?.data ||
@@ -107,7 +127,10 @@ export default function Register() {
             disabled={loading}
             className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl uppercase tracking-widest transition-all disabled:opacity-50 mt-4"
           >
-            {loading ? 'Creating...' : 'Register Profile'}
+            {status === 'creating' ? 'Creating account…'
+              : status === 'waking' ? 'Waking server…'
+              : status === 'finishing' ? 'Finishing…'
+              : 'Register Profile'}
           </button>
         </form>
 

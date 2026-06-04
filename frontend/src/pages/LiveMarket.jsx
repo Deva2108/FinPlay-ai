@@ -36,7 +36,7 @@ export default function LiveMarket() {
   // Fetch constituents based on market
   const constituentsList = useMemo(() => {
     return marketMode === 'INDIA' 
-      ? ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'BHARTIARTL.NS', 'SBI.NS', 'LICI.NS', 'ITC.NS', 'HINDUNILVR.NS']
+      ? ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'BHARTIARTL.NS', 'SBIN.NS', 'LICI.NS', 'ITC.NS', 'HINDUNILVR.NS']
       : ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'LLY', 'AVGO'];
   }, [marketMode]);
 

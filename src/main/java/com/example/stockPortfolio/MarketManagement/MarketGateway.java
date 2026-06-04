@@ -728,8 +728,70 @@ public class MarketGateway {
     public void updateFinancialsMirror(String symbol, Map<String, Object> financials) {
         String normalized = normalizeSymbol(symbol);
         if (normalized == null || financials == null) return;
-        
+
         redisTemplate.opsForValue().set(FINANCIALS_KEY_PREFIX + normalized, financials, 24, TimeUnit.HOURS);
+    }
+
+    /**
+     * Background bulk-insert of REAL daily history into stock_history (driven by the
+     * scheduler's free Yahoo backfill). Inserts ONLY dates not already present, so it
+     * never overwrites the live daily close written by updateMirror and is idempotent
+     * across runs. Real rows only (isSimulated=false), with open/high/low when Yahoo
+     * provides them. NOT called on any user request path — chart requests keep reading
+     * the DB, so the deployed app's response times are unaffected.
+     *
+     * @return number of new rows inserted.
+     */
+    public int backfillDailyHistory(String symbol, java.util.List<Map<String, Object>> candles) {
+        String normalized = normalizeSymbol(symbol);
+        if (normalized == null || candles == null || candles.isEmpty()) return 0;
+
+        String market = symbolNormalizer.isIndian(normalized) ? "INDIA" : "US";
+        java.time.LocalDate windowStart = java.time.LocalDate.now().minusYears(5).minusDays(7);
+
+        java.util.Set<java.time.LocalDate> existing = new java.util.HashSet<>();
+        for (StockHistory h : stockHistoryRepo.findBySymbolAndDateAfterOrderByDateAsc(normalized, windowStart)) {
+            existing.add(h.getDate());
+        }
+
+        java.util.List<StockHistory> toSave = new java.util.ArrayList<>();
+        for (Map<String, Object> c : candles) {
+            try {
+                Object dateObj = c.get("date");
+                Object closeObj = c.get("close");
+                if (dateObj == null || closeObj == null) continue;
+                java.time.LocalDate d = java.time.LocalDate.parse(dateObj.toString().substring(0, 10));
+                if (existing.contains(d)) continue; // never clobber an existing (live) row
+                java.math.BigDecimal close = new java.math.BigDecimal(closeObj.toString())
+                        .setScale(4, java.math.RoundingMode.HALF_UP);
+                StockHistory.StockHistoryBuilder b = StockHistory.builder()
+                        .symbol(normalized).market(market).date(d).close(close).isSimulated(false);
+                putScaled(c.get("open"), b::open);
+                putScaled(c.get("high"), b::high);
+                putScaled(c.get("low"), b::low);
+                toSave.add(b.build());
+                existing.add(d); // dedup within this batch too
+            } catch (Exception ignore) { /* skip a single malformed candle */ }
+        }
+
+        if (toSave.isEmpty()) return 0;
+        try {
+            stockHistoryRepo.saveAll(toSave);
+        } catch (org.springframework.dao.DataIntegrityViolationException dive) {
+            log.debug("Backfill race for {} — overlapping rows already inserted; ignored.", normalized);
+            return 0;
+        } catch (Exception e) {
+            log.warn("Backfill save failed for {}: {}", normalized, e.getMessage());
+            return 0;
+        }
+        return toSave.size();
+    }
+
+    private void putScaled(Object v, java.util.function.Consumer<java.math.BigDecimal> setter) {
+        if (v == null) return;
+        try {
+            setter.accept(new java.math.BigDecimal(v.toString()).setScale(4, java.math.RoundingMode.HALF_UP));
+        } catch (Exception ignore) { /* leave column null */ }
     }
 
     /**
