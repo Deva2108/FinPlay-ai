@@ -28,6 +28,10 @@ export default function LiveMarket() {
   const [loadingChart, setLoadingChart] = useState(false);
   const [timeframe, setTimeframe] = useState('1M');
   const [constituents, setConstituents] = useState([]);
+  // Live current point (FIX 2) + backend period OHLC (FIX 3). chartData stays
+  // purely HISTORICAL so the SWR cache and the FIX 4 "<2 points" gate stay honest.
+  const [currentPoint, setCurrentPoint] = useState(null);
+  const [ohlc, setOhlc] = useState(null);
 
   // Fetch constituents based on market
   const constituentsList = useMemo(() => {
@@ -69,11 +73,20 @@ export default function LiveMarket() {
     setLoadingChart(true);
     try {
       const res = await getChartData(symbol, timeframe);
+      // Historical points only — cached and used for the FIX 4 point-count gate.
       const pts = res?.data?.data || [];
       setChartData(pts);
+      // FIX 2: live point appended visually (not cached, not part of history).
+      setCurrentPoint(res?.data?.currentPoint || null);
+      // FIX 3: OHLC sourced from backend, not derived on the client.
+      setOhlc(res?.data
+        ? { open: res.data.open, high: res.data.high, low: res.data.low, close: res.data.close }
+        : null);
       if (pts.length > 0) swrWrite(`lm_chart_${symbol}_${timeframe}`, pts);
     } catch (err) {
       setChartData([]);
+      setCurrentPoint(null);
+      setOhlc(null);
     } finally {
       setLoadingChart(false);
     }
@@ -99,25 +112,26 @@ export default function LiveMarket() {
   const isUp = (details?.changesPercentage ?? details?.change ?? 0) >= 0;
   const isIndex = symbol?.startsWith('^') || symbol === 'SPY' || symbol === 'QQQ' || symbol === 'DIA';
 
-  // Compute session range + drift from chart data — gives the chart real signal
-  // without requiring new backend fields. Falls back to nulls when chart isn't ready.
+  // FIX 3 — OHLC comes from the backend (computed server-side from real daily
+  // closes), no longer derived on the client. range/drift/position are simple
+  // derivations of that authoritative OHLC. Null when the backend supplied none.
   const session = useMemo(() => {
-    if (!Array.isArray(chartData) || chartData.length === 0) return null;
-    const vals = chartData.map(p => p?.value).filter(v => typeof v === 'number');
-    if (vals.length === 0) return null;
-    const open = vals[0];
-    const close = vals[vals.length - 1];
-    // Single-pass reduce — avoids the spread-into-Math.max/min stack overflow risk
-    // on large datasets (chartData can be 365+ points at 1Y timeframe).
-    const { high, low } = vals.reduce(
-      (acc, v) => ({ high: v > acc.high ? v : acc.high, low: v < acc.low ? v : acc.low }),
-      { high: vals[0], low: vals[0] }
-    );
+    const num = (v) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? null : Number(v);
+    const open = num(ohlc?.open), high = num(ohlc?.high), low = num(ohlc?.low), close = num(ohlc?.close);
+    if (open === null || high === null || low === null || close === null) return null;
     const range = high - low;
     const driftPct = open ? ((close - open) / open) * 100 : 0;
     const position = range > 0 ? ((close - low) / range) * 100 : 50;
     return { open, close, high, low, range, driftPct, position };
-  }, [chartData]);
+  }, [ohlc]);
+
+  // FIX 2 — extend the historical series with the live current point so the
+  // chart's latest visible point equals the header price. Visual only: the
+  // historical `chartData` state (and its SWR cache) is never mutated.
+  const chartSeries = useMemo(
+    () => (currentPoint ? [...chartData, currentPoint] : chartData),
+    [chartData, currentPoint]
+  );
 
   const fmt = (v) => {
     if (v == null || isNaN(v)) return '--';
@@ -217,12 +231,27 @@ export default function LiveMarket() {
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest animate-pulse">Loading {timeframe} history</span>
                 </div>
               )}
-              <ChartComponent
-                data={chartData}
-                color={isUp ? '#10b981' : '#f43f5e'}
-                height={350}
-                isIndex={isIndex}
-              />
+              {chartData.length < 2 ? (
+                /* FIX 4 — a single daily point is not a chart. Never draw a fake
+                   line; say so honestly instead. (Daily history = 1 row/day, so
+                   1D structurally always lands here.) */
+                <div className="h-full w-full flex flex-col items-center justify-center gap-2 bg-slate-900/40 rounded-3xl border border-white/5">
+                  <Activity size={18} className="text-slate-600" />
+                  <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]">
+                    {timeframe === '1D' ? 'Intraday coming soon' : 'Not enough history yet'}
+                  </p>
+                  <p className="text-slate-600 text-[9px] font-medium">
+                    {timeframe === '1D' ? 'Daily data captures one close per day' : 'Try a longer timeframe'}
+                  </p>
+                </div>
+              ) : (
+                <ChartComponent
+                  data={chartSeries}
+                  color={isUp ? '#10b981' : '#f43f5e'}
+                  height={350}
+                  isIndex={isIndex}
+                />
+              )}
             </div>
           </div>
 

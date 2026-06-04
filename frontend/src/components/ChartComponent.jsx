@@ -34,10 +34,21 @@ function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointCl
       const n = Math.ceil(data.length / MAX_SVG_POINTS);
       source = data.filter((_, i) => i % n === 0 || i === data.length - 1);
     }
+    // A bare LocalDate ("2026-06-04") carries NO time-of-day. Parsing it with
+    // new Date(string) yields UTC midnight, which renders as a fabricated local
+    // clock time ("05:30 AM" in IST) and can even shift the calendar day west of
+    // UTC. Detect date-only points, parse them at LOCAL midnight, and flag them
+    // so the axis/tooltip never label them with a clock time. Clock labels are
+    // reserved for genuine intraday points (datetime strings / epoch numbers).
+    const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
     return source.map((d, index) => {
       const rawTime = d.date || d.time || d.timestamp;
+      const dateOnly = typeof rawTime === 'string' && DATE_ONLY.test(rawTime);
       let date;
-      if (typeof rawTime === 'string') {
+      if (dateOnly) {
+        const [y, m, dd] = rawTime.split('-').map(Number);
+        date = new Date(y, m - 1, dd); // local midnight — preserves the calendar day
+      } else if (typeof rawTime === 'string') {
         date = new Date(rawTime);
       } else {
         date = rawTime ? new Date(rawTime > 10000000000 ? rawTime : rawTime * 1000) : new Date();
@@ -46,6 +57,7 @@ function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointCl
       return {
         ...d,
         value,
+        hasTime: !dateOnly,
         formattedTime: timeFmt.format(date),
         formattedDate: dateFmt.format(date),
         fullDate:      fullFmt.format(date),
@@ -58,7 +70,7 @@ function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointCl
   // Math.min/max(...spread) which is O(n) AND allocates a temporary array.
   const { min, max, padding, isDeep, xAxisKey } = useMemo(() => {
     if (processedData.length === 0) {
-      return { min: 0, max: 0, padding: 0, isDeep: false, xAxisKey: 'formattedTime' };
+      return { min: 0, max: 0, padding: 0, isDeep: false, xAxisKey: 'formattedDate' };
     }
     let lo = Infinity, hi = -Infinity;
     for (const p of processedData) {
@@ -69,12 +81,16 @@ function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointCl
     if (!Number.isFinite(lo)) lo = 0;
     if (!Number.isFinite(hi)) hi = 0;
     const deep = processedData.length > 30;
+    // Clock-time labels ONLY for genuine intraday data; a date-only series always
+    // uses date labels (no invented "05:30 AM"). Deep datasets use date labels
+    // regardless, to avoid axis clutter.
+    const intraday = processedData.some(p => p.hasTime);
     return {
       min: lo,
       max: hi,
       padding: (hi - lo) * 0.15,
       isDeep: deep,
-      xAxisKey: deep ? 'formattedDate' : 'formattedTime'
+      xAxisKey: (intraday && !deep) ? 'formattedTime' : 'formattedDate'
     };
   }, [processedData]);
 
@@ -103,7 +119,7 @@ function ChartComponent({ data, meta, color = "#3b82f6", height = 300, onPointCl
       return (
         <div className="bg-slate-950/90 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl ring-1 ring-white/5">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">
-            {isDeep ? currentPoint.formattedDate : currentPoint.formattedTime}
+            {currentPoint.hasTime ? currentPoint.formattedTime : currentPoint.formattedDate}
           </p>
           <div className="flex items-end gap-3">
             <p className="text-xl font-black text-white leading-none">

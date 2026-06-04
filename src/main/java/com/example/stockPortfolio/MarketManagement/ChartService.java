@@ -6,6 +6,7 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.*;
@@ -43,8 +44,13 @@ public class ChartService {
                 .map(StockUniverse::getCurrency)
                 .orElse("INR");
 
-        List<Map<String, Object>> data = history.stream()
+        // Single filtered source of truth — drives both the point series and the
+        // period OHLC, so the chart line and the OHLC strip can never disagree.
+        List<StockHistory> rows = history.stream()
                 .filter(h -> !h.isSimulated()) // exclude any pre-existing synthetic rows
+                .collect(Collectors.toList());
+
+        List<Map<String, Object>> data = rows.stream()
                 .map(h -> {
                     Map<String, Object> point = new HashMap<>();
                     point.put("date", h.getDate().toString());
@@ -59,6 +65,26 @@ public class ChartService {
         result.put("data", data);
         result.put("source", data.isEmpty() ? "no_history" : "db");
         result.put("points", data.size());
+
+        // FIX 3 — period OHLC computed server-side from the real daily closes
+        // (open = first close, close = last close, high/low = extremes). Per-row
+        // intraday OHLC is not captured in stock_history, so these are close-based
+        // by design — the same values the client used to derive, now authoritative
+        // on the backend. Omitted entirely when there is no history.
+        if (!rows.isEmpty()) {
+            BigDecimal first = rows.get(0).getClose();
+            BigDecimal last = rows.get(rows.size() - 1).getClose();
+            BigDecimal hi = first, lo = first;
+            for (StockHistory h : rows) {
+                BigDecimal c = h.getClose();
+                if (c.compareTo(hi) > 0) hi = c;
+                if (c.compareTo(lo) < 0) lo = c;
+            }
+            result.put("open", first.setScale(2, RoundingMode.HALF_UP));
+            result.put("high", hi.setScale(2, RoundingMode.HALF_UP));
+            result.put("low", lo.setScale(2, RoundingMode.HALF_UP));
+            result.put("close", last.setScale(2, RoundingMode.HALF_UP));
+        }
 
         return result;
     }

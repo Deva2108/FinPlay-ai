@@ -183,7 +183,30 @@ public class MarketController {
             @RequestParam String symbol,
             @RequestParam(required = false, defaultValue = "1M") String timeframe) {
         try {
-            Map<String, Object> response = chartService.getChartData(symbol, timeframe);
+            Map<String, Object> chart = chartService.getChartData(symbol, timeframe);
+            // Shallow copy so we never mutate the @Cacheable map ChartService returns.
+            Map<String, Object> response = new HashMap<>(chart);
+
+            // FIX 2 — optional live "currentPoint" so the chart's latest visible
+            // point matches the header price. Read-only from the existing quote
+            // mirror; NOT written to stock_history (no DB row mutation) and NOT
+            // cached (lives only on this per-request copy). No provider/scheduler change.
+            try {
+                ApiResponse<Map<String, Object>> quote = marketGateway.getStockQuote(symbol);
+                if (quote != null && quote.isSuccess() && quote.getData() != null
+                        && quote.getData().get("price") instanceof Number) {
+                    Object price = quote.getData().get("price");
+                    Map<String, Object> currentPoint = new HashMap<>();
+                    currentPoint.put("date", java.time.LocalDate.now().toString());
+                    currentPoint.put("value", price);
+                    currentPoint.put("close", price);
+                    currentPoint.put("live", true);
+                    response.put("currentPoint", currentPoint);
+                }
+            } catch (Exception ignore) {
+                // currentPoint is optional — never fail the chart because a live quote missed.
+            }
+
             return ResponseEntity.ok(ApiResponse.ok(response, "Historical data loaded"));
         } catch (Exception e) {
             log.error("Error fetching chart data for {} {}: {}", symbol, timeframe, e.getMessage());
