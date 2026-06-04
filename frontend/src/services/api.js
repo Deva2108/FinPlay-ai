@@ -347,37 +347,9 @@ export const unwrapEnvelope = (response) => {
 
 export const readApiEnvelope = unwrapEnvelope;
 
-// Auth APIs
-function persistAuth(result) {
-  const token = result?.data?.token;
-  const user  = result?.data?.user;
-  if (token) localStorage.setItem('token', token);
-  if (user)  localStorage.setItem('finplay_user', JSON.stringify(user));
-}
-
-export const registerUser = async (data) => {
-  const response = await api.post(API_ENDPOINTS.AUTH.REGISTER, data);
-  const result = readApiEnvelope(response);
-  persistAuth(result);
-  return result;
-};
-
-export const loginUser = async (data) => {
-  localStorage.removeItem('token');
-  localStorage.removeItem('finplay_user');
-  const response = await api.post(API_ENDPOINTS.AUTH.LOGIN, data);
-  const result = readApiEnvelope(response);
-  persistAuth(result);
-  return result;
-};
-
-export const logoutUser = () => {
-  localStorage.removeItem('token');
-  localStorage.removeItem('finplay_user');
-  // Drop the per-session SWR cache so the next user on this browser starts
-  // cold instead of inheriting this user's cached portfolio/market data.
-  swrClear();
-};
+// Auth APIs (persistAuth / loginUser / registerUser / logoutUser) were moved to
+// ./auth.js so this module stays networking-only. Import them from
+// '../services/auth'. swrClear (used by logoutUser) is still exported above.
 
 // User APIs
 export const updateProfile = async (email, data) => {

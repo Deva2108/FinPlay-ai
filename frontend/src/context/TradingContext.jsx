@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   getUserPortfolios, 
   getHoldings, 
@@ -30,11 +30,19 @@ export function TradingProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Latched on logout. Once true, every async writeback below bails before its
+  // setState, so an in-flight hydration/insight fetch — or a wake-retry that
+  // resolves during the hard-redirect unload window — can never repopulate the
+  // previous user's data into a now-logged-out tree. A fresh mount (after the
+  // hard reload) starts with this back at false.
+  const loggedOutRef = useRef(false);
+
   const refreshInsights = useCallback(async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
       const data = await getUserInsights();
+      if (loggedOutRef.current) return;
       if (data?.data) setUserInsights(data.data);
       else if (data && !data.success) setUserInsights(data); // Fallback for unwrapped
     } catch (err) {
@@ -60,6 +68,7 @@ export function TradingProvider({ children }) {
       // insights are fetched separately below so first paint isn't blocked
       // on the (slower, cache-miss-prone) insight read.
       const res = await syncAll({ light: true });
+      if (loggedOutRef.current) return;
       const data = res?.data;
 
       if (data) {
@@ -86,11 +95,11 @@ export function TradingProvider({ children }) {
       }
     } catch (error) {
       console.error("Failed to sync application data", error);
-      setError('Failed to load portfolio data.');
+      if (!loggedOutRef.current) setError('Failed to load portfolio data.');
     } finally {
       // Unblock first paint immediately — insights backfill happens below
       // without holding the loading flag.
-      setLoading(false);
+      if (!loggedOutRef.current) setLoading(false);
     }
 
     // Deferred insights fetch — fires after first paint, no await on the
@@ -141,6 +150,28 @@ export function TradingProvider({ children }) {
     
     // Logic for sync with backend removed as no valid endpoint exists for game result balance adjustment
     // and frontend must not modify balance directly.
+  }, []);
+
+  // Reset all trading state to its initial (logged-out) shape. Storage clearing
+  // and the redirect are NOT done here — the auth layer (logoutUser) owns
+  // storage and the UI layer (useLogout) owns the hard redirect. This only
+  // tears down in-memory React state and latches the loggedOut guard so no
+  // in-flight async writeback can repopulate it before the page unloads.
+  const logout = useCallback(() => {
+    loggedOutRef.current = true;
+    setBalance(100000);
+    setPortfolio([]);
+    setActivePortfolioId(null);
+    setLastAction(null);
+    setDecisions([]);
+    setMissedOpportunities([]);
+    setUserInsights({
+      behaviorType: 'neutral',
+      insightMessage: 'Start making decisions to unlock behavioral analysis.'
+    });
+    setGameImpact({ amount: 0, type: null, timestamp: null });
+    setError(null);
+    setLoading(false);
   }, []);
 
   const executeBuy = useCallback(async (stock, quantity) => {
@@ -278,8 +309,8 @@ export function TradingProvider({ children }) {
   }, [activePortfolioId, balance, portfolio, refreshData]);
 
   const actions = useMemo(() => ({
-    executeBuy, executeSell, recordDecision, addMissedOpportunity, recordGameResult: syncGameResult, refreshData, refreshInsights
-  }), [executeBuy, executeSell, recordDecision, addMissedOpportunity, syncGameResult, refreshData, refreshInsights]);
+    executeBuy, executeSell, recordDecision, addMissedOpportunity, recordGameResult: syncGameResult, refreshData, refreshInsights, logout
+  }), [executeBuy, executeSell, recordDecision, addMissedOpportunity, syncGameResult, refreshData, refreshInsights, logout]);
 
   const state = useMemo(() => ({
     balance, portfolio, lastAction, decisions, missedOpportunities, userInsights, gameImpact, loading, error, activePortfolioId

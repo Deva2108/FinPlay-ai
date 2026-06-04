@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
-import { registerUser } from '../services/api';
+import { registerUser } from '../services/auth';
 import { Rocket } from 'lucide-react';
 
 export default function Register() {

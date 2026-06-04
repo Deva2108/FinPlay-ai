@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
-import { loginUser } from '../services/api';
+import { loginUser } from '../services/auth';
 import { useTradeActions } from '../context/TradingContext';
 import { Zap } from 'lucide-react';
 

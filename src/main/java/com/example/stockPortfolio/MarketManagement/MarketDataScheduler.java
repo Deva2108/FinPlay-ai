@@ -50,6 +50,16 @@ public class MarketDataScheduler {
     private static final int CHART_UPDATE_FREQUENCY = 5;
     private static final int BATCH_SIZE = 12;
 
+    // Cold-deploy bootstrap: the market page's default symbols (RELIANCE.NS / AAPL)
+    // plus a couple of top constituents, so a fresh deploy serves real prices
+    // before any user activity and regardless of market hours. Hard-capped list,
+    // provider-friendly equities only (no index symbols) — must NEVER grow into a
+    // full-universe walk. Fetched at most 5; seeded once per JVM.
+    private static final List<String> BOOTSTRAP_SYMBOLS =
+            List.of("AAPL", "RELIANCE.NS", "MSFT", "TCS.NS", "HDFCBANK.NS");
+    private final java.util.concurrent.atomic.AtomicBoolean bootstrapHydrated =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
     // Instance ID for scheduler lock ownership. Generated once per JVM so log
     // messages can identify which instance held a contested lock.
     private static final String INSTANCE_ID = java.util.UUID.randomUUID().toString().substring(0, 8);
@@ -321,6 +331,51 @@ public class MarketDataScheduler {
         }
     }
 
+    /**
+     * One-time cold-deploy warm-up. Seeds the Redis mirror for a tiny, fixed set
+     * of provider-friendly default symbols so the market page shows real prices
+     * immediately after deploy — before any user activity and regardless of
+     * market hours. Hard-capped at 5 symbols; never walks the universe. Uses ONLY
+     * existing fetch/persist paths (no provider or caching changes).
+     */
+    private void bootstrapWarmHydration() {
+        List<String> targets = BOOTSTRAP_SYMBOLS.stream()
+                .map(symbolNormalizer::normalize)
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(5)
+                .collect(Collectors.toList());
+        if (targets.isEmpty()) { bootstrapHydrated.set(true); return; }
+
+        try {
+            Map<String, Map<String, Object>> quotes = externalMarketDataGateway.fetchTwelveDataBatch(targets);
+            if (quotes != null && !quotes.isEmpty()) {
+                quotes.forEach(marketGateway::updateMirror);
+                bootstrapHydrated.set(true);
+                log.info("Bootstrap warm hydration seeded {} default symbols.", quotes.size());
+                return;
+            }
+            // Batch empty → staggered Yahoo fallback (same pattern as the main
+            // cycle). Mark done so we don't retry-storm; the async tasks fill in.
+            log.warn("Bootstrap batch empty. Falling back to staggered Yahoo for {} default symbols.", targets.size());
+            for (int i = 0; i < targets.size(); i++) {
+                final String s = targets.get(i);
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        Map<String, Object> q = externalMarketDataGateway.fetchYahooFallbackQuote(s);
+                        if (q != null) marketGateway.updateMirror(s, q);
+                    } catch (Exception ex) {
+                        log.warn("Bootstrap Yahoo fallback failed for {}: {}", s, ex.getMessage());
+                    }
+                }, CompletableFuture.delayedExecutor(i * 500L, TimeUnit.MILLISECONDS, aiPrecomputationExecutor));
+            }
+            bootstrapHydrated.set(true);
+        } catch (Exception e) {
+            // Leave the flag false so the next tick retries the bootstrap once more.
+            log.warn("Bootstrap warm hydration failed, will retry next cycle: {}", e.getMessage());
+        }
+    }
+
     @Scheduled(fixedRateString = "${finplay.scheduler.hydration-rate-ms:60000}", initialDelay = 30000)
     public void hydrateMarketMirror() {
         if (!acquireSchedulerLock("hydrateMarketMirror")) return;
@@ -332,6 +387,13 @@ public class MarketDataScheduler {
         if (policyService.isProviderDisabled(MarketDataPolicyService.PROVIDER_TWELVEDATA)) {
             log.debug("Hydration cycle skipped — TwelveData in provider-wide cooldown.");
             return;
+        }
+
+        // Cold-deploy warm-up: seed the default symbols once, before the
+        // market-active / market-hours gates below would otherwise skip a fresh,
+        // idle, off-hours deploy and leave the market page showing "--".
+        if (!bootstrapHydrated.get()) {
+            bootstrapWarmHydration();
         }
 
         Set<String> urgentSymbols = marketGateway.getPrioritySymbols();

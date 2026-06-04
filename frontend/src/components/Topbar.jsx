@@ -1,11 +1,24 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, BarChart3, Lightbulb, Bell, User, TrendingUp, Globe, Shield } from 'lucide-react';
+import { LayoutDashboard, Briefcase, BarChart3, Lightbulb, Bell, User, TrendingUp, Globe, Shield, LogOut } from 'lucide-react';
 import { useMarket } from '../context/MarketContext';
+import { useLogout } from '../hooks/useLogout';
 
 export default function Topbar() {
   const { marketMode, setMarketMode, accentColor } = useMarket();
   const navigate = useNavigate();
+  const logout = useLogout();
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const navItems = [
     { path: '/', name: 'Dashboard', icon: LayoutDashboard },
@@ -75,16 +88,34 @@ export default function Topbar() {
           
           <div className="h-8 w-[1px] bg-white/10 mx-2 hidden md:block" />
 
-          <div className="flex items-center gap-3 cursor-pointer group">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 p-[2px] group-hover:scale-105 transition-transform shadow-lg shadow-blue-500/10">
-              <div className="w-full h-full bg-slate-950 rounded-full flex items-center justify-center">
-                <User size={18} className="text-white" />
+          <div className="relative" ref={menuRef}>
+            <div
+              onClick={() => setMenuOpen((o) => !o)}
+              className="flex items-center gap-3 cursor-pointer group"
+            >
+              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 p-[2px] group-hover:scale-105 transition-transform shadow-lg shadow-blue-500/10">
+                <div className="w-full h-full bg-slate-950 rounded-full flex items-center justify-center">
+                  <User size={18} className="text-white" />
+                </div>
+              </div>
+              <div className="hidden xl:block">
+                <span className="text-sm font-black text-white block leading-none">Student 01</span>
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">Pro Learner</span>
               </div>
             </div>
-            <div className="hidden xl:block">
-              <span className="text-sm font-black text-white block leading-none">Student 01</span>
-              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">Pro Learner</span>
-            </div>
+
+            {menuOpen && (
+              <div className="absolute right-0 mt-3 w-44 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden z-[110]">
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-slate-300 hover:bg-white/5 hover:text-rose-400 transition-colors"
+                >
+                  <LogOut size={16} />
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -23,8 +23,16 @@ export function StockPanelProvider({ children }) {
     setTimeout(() => setSelectedStock(null), 300);
   };
 
+  // Full reset on logout: drop the open panel, the selected stock, and the
+  // per-user recently-viewed list so the next user on this browser starts clean.
+  const resetStockPanel = () => {
+    setIsOpen(false);
+    setSelectedStock(null);
+    setRecentlyViewed([]);
+  };
+
   return (
-    <StockPanelContext.Provider value={{ selectedStock, isOpen, recentlyViewed, openStockPanel, closeStockPanel }}>
+    <StockPanelContext.Provider value={{ selectedStock, isOpen, recentlyViewed, openStockPanel, closeStockPanel, resetStockPanel }}>
       {children}
     </StockPanelContext.Provider>
   );

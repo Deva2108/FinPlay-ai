@@ -17,15 +17,16 @@ export default function LiveMarket() {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // Default to Nifty 50 or S&P 500
-  const defaultIndex = marketMode === 'INDIA' ? '^NSEI' : 'SPY';
+  // Default to a provider-covered equity (indices like ^NSEI/SPY are poorly
+  // covered by free-tier quote providers, so they render "--" on a cold mirror).
+  const defaultIndex = marketMode === 'INDIA' ? 'RELIANCE.NS' : 'AAPL';
   const [symbol, setSymbol] = useState(location.state?.selectedStock || defaultIndex);
   const [details, setDetails] = useState(null);
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [loadingChart, setLoadingChart] = useState(false);
-  const [timeframe, setTimeframe] = useState('1D');
+  const [timeframe, setTimeframe] = useState('1M');
   const [constituents, setConstituents] = useState([]);
 
   // Fetch constituents based on market
@@ -44,11 +45,14 @@ export default function LiveMarket() {
         getLiveQuotes(constituentsList)
       ]);
 
-      if (detailsRes?.syncing) {
-        setIsSyncing(true);
-      } else if (detailsRes?.data) {
+      // Read the backend sync signal from the envelope meta (status === 'SYNCING'),
+      // not a non-existent `detailsRes.syncing` field. Prefer live data when present;
+      // otherwise surface an honest syncing state instead of a bare "--".
+      if (detailsRes?.data) {
         setDetails(detailsRes.data);
         swrWrite(`lm_det_${symbol}`, detailsRes.data);
+      } else if (detailsRes?.meta?.status === 'SYNCING' || !detailsRes?.success) {
+        setIsSyncing(true);
       }
 
       const quotes = quotesRes?.data || [];
@@ -137,7 +141,7 @@ export default function LiveMarket() {
             </h1>
           </div>
           {isSyncing ? (
-            <p className="text-sm font-black text-slate-500 uppercase tracking-widest animate-pulse">Refreshing quote...</p>
+            <p className="text-sm font-black text-slate-500 uppercase tracking-widest animate-pulse">Syncing market data…</p>
           ) : (
             <p className="text-2xl font-black text-white flex items-center gap-3">
               {isIndex ? (details?.price ?? '--') : `${currencySymbol}${details?.price ?? '--'}`}
