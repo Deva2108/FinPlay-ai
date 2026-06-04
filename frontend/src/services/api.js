@@ -201,8 +201,16 @@ const inflightKey = (config) => {
 };
 
 // Capture whatever default adapter axios shipped with (xhr in the browser).
-// Works across axios v0.x and v1.x without relying on the v1-only getAdapter().
-const __baseAdapter = api.defaults.adapter || axios.defaults.adapter;
+// Axios 1.x stores defaults.adapter as an ARRAY of adapter NAMES
+// (e.g. ["xhr","http","fetch"]) — not a callable function. Calling that array
+// as `__baseAdapter(config)` is what broke request dispatch under 1.15.x. The
+// official getAdapter() resolves the name array (or string, or function) into
+// the concrete adapter fn for this environment. The typeof guard keeps the
+// pre-1.x path working (there defaults.adapter was already a function).
+const __rawAdapter = api.defaults.adapter || axios.defaults.adapter;
+const __baseAdapter = typeof axios.getAdapter === 'function'
+  ? axios.getAdapter(__rawAdapter)
+  : __rawAdapter;
 
 api.defaults.adapter = async (config) => {
   if ((config.method || 'get').toLowerCase() !== 'get') return __baseAdapter(config);
