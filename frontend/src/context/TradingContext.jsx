@@ -151,8 +151,11 @@ export function TradingProvider({ children }) {
     const cost = qty * price;
     if (cost > balance) return { success: false, error: "Insufficient balance" };
 
-    const prevBalance = balance;
-    const prevPortfolio = [...portfolio];
+    // Snapshot ONLY this symbol's pre-trade holding (or null if new) for a
+    // transaction-safe rollback. The optimistic map() below replaces this
+    // symbol's entry with a fresh object, so this reference keeps the old
+    // values intact for restoration without clobbering other symbols.
+    const prevHolding = portfolio.find(p => p.symbol === stock.symbol) || null;
 
     // Optimistic Update
     setBalance(prev => prev - cost);
@@ -195,8 +198,21 @@ export function TradingProvider({ children }) {
       await refreshData();
       return { success: true };
     } catch (err) {
-      setBalance(prevBalance);
-      setPortfolio(prevPortfolio);
+      // Transaction-safe rollback: reverse ONLY this trade's effects via
+      // functional updates instead of restoring a stale snapshot (which would
+      // wipe a concurrent trade's successful change). Balance: undo the -cost.
+      // Holdings: if this symbol pre-existed, restore its prior entry in place;
+      // if it was newly created by the optimistic add, drop it. Other symbols
+      // are left exactly as they currently are.
+      setBalance(prev => prev + cost);
+      setPortfolio(prev => {
+        if (prevHolding) {
+          return prev.some(p => p.symbol === stock.symbol)
+            ? prev.map(p => p.symbol === stock.symbol ? prevHolding : p)
+            : [...prev, prevHolding];
+        }
+        return prev.filter(p => p.symbol !== stock.symbol);
+      });
       return { success: false, error: err.message || "Trade failed" };
     }
   }, [activePortfolioId, balance, portfolio, refreshData]);
@@ -209,11 +225,15 @@ export function TradingProvider({ children }) {
     const sellQty = quantity || holding?.quantity || 0;
     if (sellQty <= 0) return { success: false, error: "Invalid quantity" };
     
-    const sellPrice = (currentValue / sellQty) || 0;
-    const sellValue = currentValue || (sellPrice * sellQty);
-
-    const prevBalance = balance;
-    const prevPortfolio = [...portfolio];
+    // Never sell at a fabricated $0 price. currentValue is derived from the
+    // live quote; if the quote is unavailable it arrives as 0/undefined/NaN,
+    // which the old `|| 0` fallback turned into a $0 sell that corrupts the
+    // portfolio. Reject up front with a user-facing message instead.
+    const sellPrice = currentValue / sellQty;
+    if (!Number.isFinite(sellPrice) || sellPrice <= 0) {
+      return { success: false, error: "Live price unavailable right now. Please try again in a moment." };
+    }
+    const sellValue = sellPrice * sellQty;
 
     // Optimistic Update
     setBalance(prev => prev + sellValue);
@@ -244,8 +264,15 @@ export function TradingProvider({ children }) {
       await refreshData();
       return { success: true };
     } catch (err) {
-      setBalance(prevBalance);
-      setPortfolio(prevPortfolio);
+      // Transaction-safe rollback: reverse ONLY this trade's effects via
+      // functional updates instead of restoring a stale snapshot. Snapshot
+      // restore would clobber a concurrent trade's successful balance/holding
+      // change. Balance: undo the +sellValue. Holdings: restore just this
+      // symbol's pre-trade state, leaving every other symbol untouched.
+      setBalance(prev => prev - sellValue);
+      setPortfolio(prev => prev.some(p => p.symbol === symbol)
+        ? prev.map(p => p.symbol === symbol ? holding : p)
+        : [...prev, holding]);
       return { success: false, error: err.message || "Sell failed" };
     }
   }, [activePortfolioId, balance, portfolio, refreshData]);

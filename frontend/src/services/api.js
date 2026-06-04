@@ -31,6 +31,19 @@ export const swrAge = (key) => {
     return ts ? Math.floor((Date.now() - ts) / 1000) : null;
   } catch { return null; }
 };
+// Purge ONLY FinPlay's own SWR cache namespace (fp_swr_*). Used on logout so a
+// second user on the same browser can't be served the previous user's cached
+// portfolio/market data. All other sessionStorage keys are left untouched.
+export const swrClear = () => {
+  try {
+    const keys = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k && k.startsWith(SWR_NS)) keys.push(k);
+    }
+    keys.forEach((k) => sessionStorage.removeItem(k));
+  } catch {}
+};
 
 export const API_ENDPOINTS = {
   AUTH: {
@@ -263,7 +276,16 @@ api.interceptors.response.use(
       (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || error.message === 'Network Error' || error.message?.includes('timeout'));
 
     if (isTransient && config && !config._retried) {
-      config._retried = true;
+      // Clone the config for the retry and strip the abort primitives. The
+      // original signal/cancelToken belong to the FIRST attempt — which has
+      // already aborted (cold-start timeout). Reusing them makes the retry
+      // abort instantly, so cold-start registration never recovers. A shallow
+      // clone with these removed gives the retry fresh request state while
+      // preserving url/method/data/headers/params. _retried lives on the clone
+      // so a second transient failure still terminates (no infinite retry).
+      const retryConfig = { ...config, _retried: true };
+      delete retryConfig.signal;
+      delete retryConfig.cancelToken;
       // Before blindly re-firing, find out whether the backend is alive. If
       // it's not, this is a Render cold-start — wait for wake (with a visible
       // signal so the UI can show "Waking server…") then refire once.
@@ -272,7 +294,7 @@ api.interceptors.response.use(
         const woke = await waitForWake();
         if (!woke) return Promise.reject(error); // Genuinely down — surface it.
       }
-      return api(config);
+      return api(retryConfig);
     }
 
     if (error.response && error.response.status === 401) {
@@ -352,6 +374,9 @@ export const loginUser = async (data) => {
 export const logoutUser = () => {
   localStorage.removeItem('token');
   localStorage.removeItem('finplay_user');
+  // Drop the per-session SWR cache so the next user on this browser starts
+  // cold instead of inheriting this user's cached portfolio/market data.
+  swrClear();
 };
 
 // User APIs
