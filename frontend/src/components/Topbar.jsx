@@ -1,13 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, BarChart3, Lightbulb, Bell, User, TrendingUp, Globe, Shield, LogOut } from 'lucide-react';
+import { LayoutDashboard, Briefcase, BarChart3, Lightbulb, Bell, TrendingUp, Shield, LogOut } from 'lucide-react';
 import { useMarket } from '../context/MarketContext';
 import { useLogout } from '../hooks/useLogout';
+import { getStoredUser } from '../services/auth';
 
 export default function Topbar() {
   const { marketMode, setMarketMode, accentColor } = useMarket();
   const navigate = useNavigate();
   const logout = useLogout();
+
+  // Real identity from the persisted session, replacing the hardcoded
+  // "Student 01" placeholder. Read once on mount — name/email don't change
+  // mid-session, and logout hard-reloads the document so a stale value can't
+  // survive into the next session.
+  const user = getStoredUser();
+  const displayName = user?.name?.trim() || 'Trader';
+  const displayEmail = user?.email || 'Paper Trading';
+  const avatarInitial = displayName.charAt(0).toUpperCase();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -95,17 +105,21 @@ export default function Topbar() {
             >
               <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 p-[2px] group-hover:scale-105 transition-transform shadow-lg shadow-blue-500/10">
                 <div className="w-full h-full bg-slate-950 rounded-full flex items-center justify-center">
-                  <User size={18} className="text-white" />
+                  <span className="text-sm font-black text-white">{avatarInitial}</span>
                 </div>
               </div>
-              <div className="hidden xl:block">
-                <span className="text-sm font-black text-white block leading-none">Student 01</span>
-                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">Pro Learner</span>
+              <div className="hidden xl:block max-w-[140px]">
+                <span className="text-sm font-black text-white block leading-none truncate">{displayName}</span>
+                <span className="text-[9px] font-bold text-slate-500 lowercase tracking-tighter truncate block">{displayEmail}</span>
               </div>
             </div>
 
             {menuOpen && (
-              <div className="absolute right-0 mt-3 w-44 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden z-[110]">
+              <div className="absolute right-0 mt-3 w-56 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden z-[110]">
+                <div className="px-4 py-3 border-b border-white/5">
+                  <p className="text-sm font-black text-white truncate">{displayName}</p>
+                  <p className="text-[10px] font-bold text-slate-500 lowercase truncate">{displayEmail}</p>
+                </div>
                 <button
                   type="button"
                   onClick={logout}

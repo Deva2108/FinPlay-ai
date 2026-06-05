@@ -36,6 +36,7 @@ const SimpleDashboard = lazy(() => import('./pages/SimpleDashboard'));
 
 import Layout from './components/Layout';
 import WakingBanner from './components/WakingBanner';
+import { hasValidSession } from './services/auth';
 import { StockPanelProvider } from './context/StockPanelContext';
 import { TradingProvider } from './context/TradingContext';
 import { MarketProvider } from './context/MarketContext';
@@ -131,8 +132,11 @@ class RouteErrorBoundary extends Component<{ children: ReactNode; name?: string 
 }
 
 function PrivateRoute({ children }: { children: ReactNode }) {
-  const token = localStorage.getItem('token');
-  return token ? <>{children}</> : <Navigate to="/login" replace />;
+  // Validate the token's freshness, not just its presence. An expired/garbage
+  // token used to render the authenticated shell for a beat before a 401 bounced
+  // the user (the "appear logged in unexpectedly" flash). hasValidSession()
+  // fails open on unreadable tokens, so a valid session is never wrongly blocked.
+  return hasValidSession() ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
 export default function App() {

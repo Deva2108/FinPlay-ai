@@ -10,6 +10,10 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Progressive request status so the button never looks frozen during a cold
+  // Render start-up: authenticating → waking → finishing. Mirrors Register, which
+  // already had this; Login previously sat on a static "Loading Portfolio…".
+  const [status, setStatus] = useState('idle'); // idle | authenticating | waking | finishing
   const navigate = useNavigate();
   const { refreshData } = useTradeActions();
 
@@ -18,14 +22,21 @@ export default function Login() {
 
     setError(null);
     setLoading(true);
+    setStatus('authenticating');
+    // A cold Render backend takes ~10–20s on the first hit. After 4s, surface a
+    // "Waking server…" state so the user sees progress instead of a frozen
+    // button. The single 30s-timeout, no-retry POST (auth.js) survives that window.
+    const wakeTimer = setTimeout(() => setStatus('waking'), 4000);
 
     try {
       const data = await loginUser({
         email: email.trim(),
         password: password.trim()
       });
+      clearTimeout(wakeTimer);
 
       if (data?.success) {
+        setStatus('finishing');
         // Navigate immediately — do NOT block the post-login transition on the
         // portfolio sync. A slow/cold sync used to make a successful login appear
         // frozen. The dashboard renders its shell instantly and fills in as this
@@ -38,6 +49,8 @@ export default function Login() {
       }
 
     } catch (err) {
+      clearTimeout(wakeTimer);
+      setStatus('idle');
       console.error('LOGIN ERROR FULL:', err);
 
       const msg =
@@ -116,7 +129,10 @@ export default function Login() {
               disabled={loading}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-5 rounded-2xl uppercase tracking-[0.2em] text-xs md:text-sm transition-all disabled:opacity-50 shadow-xl shadow-blue-900/20 active:scale-[0.98]"
             >
-              {loading ? 'Loading Portfolio...' : 'Enter Arena'}
+              {status === 'authenticating' ? 'Authenticating…'
+                : status === 'waking' ? 'Waking server…'
+                : status === 'finishing' ? 'Loading portfolio…'
+                : 'Enter Arena'}
             </button>
           </div>
         </form>

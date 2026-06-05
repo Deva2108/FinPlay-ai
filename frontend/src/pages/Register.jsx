@@ -20,9 +20,11 @@ export default function Register() {
   const handleRegister = async (e) => {
     e.preventDefault();
 
-    // STEP 1: FIX REGISTER FLOW - Simple password validation
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+    // Client floor must match the backend contract (RegistrationRequestDTO
+    // enforces @Size(min = 8)). A 6–7 char password used to pass here and then
+    // fail server-side with a confusing validation error.
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
       return;
     }
 
@@ -119,7 +121,7 @@ export default function Register() {
                 setError(null);
               }}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 transition-colors"
-              placeholder="Min 6 chars"
+              placeholder="Min 8 chars"
             />
           </div>
           <button 
